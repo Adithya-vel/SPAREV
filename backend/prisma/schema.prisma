@@ -1,0 +1,89 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model ParkingLot {
+  id             String           @id @default(cuid())
+  name           String
+  address        String
+  totalSpots     Int
+  pricePerHour   Int
+  hasEvCharging  Boolean          @default(false)
+  distanceMeters Int?
+  spots          ParkingSpot[]
+  chargingStations ChargingStation[]
+  reservations   Reservation[]
+  createdAt      DateTime         @default(now())
+}
+
+model ParkingSpot {
+  id           String        @id @default(cuid())
+  lotId        String
+  label        String
+  isAvailable  Boolean       @default(true)
+  supportsEv   Boolean       @default(false)
+  lot          ParkingLot    @relation(fields: [lotId], references: [id])
+  reservations Reservation[]
+}
+
+model Reservation {
+  id           String             @id @default(cuid())
+  lotId        String
+  spotId       String
+  userId       String
+  vehiclePlate String
+  startTime    DateTime           @default(now())
+  status       String             @default("reserved")
+  lot          ParkingLot         @relation(fields: [lotId], references: [id])
+  spot         ParkingSpot        @relation(fields: [spotId], references: [id])
+  chargingSessions ChargingSession[]
+  transactions Transaction[]
+}
+
+model ChargingStation {
+  id            String            @id @default(cuid())
+  lotId         String
+  name          String
+  connectorType String
+  maxKw         Int
+  isAvailable   Boolean           @default(true)
+  lot           ParkingLot        @relation(fields: [lotId], references: [id])
+  sessions      ChargingSession[]
+}
+
+model ChargingSession {
+  id            String           @id @default(cuid())
+  stationId     String
+  reservationId String?
+  userId        String
+  startedAt     DateTime         @default(now())
+  status        String           @default("active")
+  energyKwh     Float?
+  cost          Int?
+  station       ChargingStation  @relation(fields: [stationId], references: [id])
+  reservation   Reservation?     @relation(fields: [reservationId], references: [id])
+}
+
+model Tariff {
+  id           String  @id @default(cuid())
+  name         String
+  pricePerHour Int
+  pricePerKwh  Float?
+  peakMultiplier Float?
+  createdAt    DateTime @default(now())
+}
+
+model Transaction {
+  id             String             @id @default(cuid())
+  reservationId  String?
+  amountCents    Int
+  currency       String             @default("INR")
+  status         String             @default("pending")
+  createdAt      DateTime           @default(now())
+  reservation    Reservation?       @relation(fields: [reservationId], references: [id])
+}
