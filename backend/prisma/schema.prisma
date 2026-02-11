@@ -8,41 +8,62 @@ datasource db {
 }
 
 model ParkingLot {
-  id             String           @id @default(cuid())
-  name           String
-  address        String
-  totalSpots     Int
-  pricePerHour   Int
-  hasEvCharging  Boolean          @default(false)
-  distanceMeters Int?
-  spots          ParkingSpot[]
+  id               String             @id @default(cuid())
+  name             String
+  address          String
+  totalSpots       Int
+  pricePerHour     Int
+  hasEvCharging    Boolean            @default(false)
+  distanceMeters   Int?
+  timezone         String             @default("UTC")
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+  spots            ParkingSpot[]
   chargingStations ChargingStation[]
-  reservations   Reservation[]
-  createdAt      DateTime         @default(now())
+  reservations     Reservation[]
+  lotDailyMetrics  LotDailyMetric[]
+  usageEvents      UsageEvent[]
 }
 
 model ParkingSpot {
-  id           String        @id @default(cuid())
-  lotId        String
-  label        String
-  isAvailable  Boolean       @default(true)
-  supportsEv   Boolean       @default(false)
-  lot          ParkingLot    @relation(fields: [lotId], references: [id])
-  reservations Reservation[]
+  id            String        @id @default(cuid())
+  lotId         String
+  label         String
+  isAvailable   Boolean       @default(true)
+  supportsEv    Boolean       @default(false)
+  lot           ParkingLot    @relation(fields: [lotId], references: [id])
+  reservations  Reservation[]
+  usageEvents   UsageEvent[]
+  @@index([lotId])
 }
 
 model Reservation {
-  id           String             @id @default(cuid())
-  lotId        String
-  spotId       String
-  userId       String
-  vehiclePlate String
-  startTime    DateTime           @default(now())
-  status       String             @default("reserved")
-  lot          ParkingLot         @relation(fields: [lotId], references: [id])
-  spot         ParkingSpot        @relation(fields: [spotId], references: [id])
-  chargingSessions ChargingSession[]
-  transactions Transaction[]
+  id                String               @id @default(cuid())
+  lotId             String
+  spotId            String
+  userId            String
+  vehiclePlate      String
+  startTime         DateTime             @default(now())
+  endTime           DateTime?
+  status            String               @default("reserved")
+  lot               ParkingLot           @relation(fields: [lotId], references: [id])
+  spot              ParkingSpot          @relation(fields: [spotId], references: [id])
+  chargingSessions  ChargingSession[]
+  transactions      Transaction[]
+  reservationEvents ReservationEvent[]
+  @@index([lotId, startTime])
+  @@index([spotId, startTime])
+}
+
+model ReservationEvent {
+  id            String             @id @default(cuid())
+  reservationId String
+  status        String
+  recordedAt    DateTime           @default(now())
+  note          String?
+  metadata      String?
+  reservation   Reservation        @relation(fields: [reservationId], references: [id])
+  @@index([reservationId, recordedAt])
 }
 
 model ChargingStation {
@@ -54,6 +75,7 @@ model ChargingStation {
   isAvailable   Boolean           @default(true)
   lot           ParkingLot        @relation(fields: [lotId], references: [id])
   sessions      ChargingSession[]
+  @@index([lotId])
 }
 
 model ChargingSession {
@@ -62,28 +84,64 @@ model ChargingSession {
   reservationId String?
   userId        String
   startedAt     DateTime         @default(now())
+  endedAt       DateTime?
   status        String           @default("active")
   energyKwh     Float?
   cost          Int?
   station       ChargingStation  @relation(fields: [stationId], references: [id])
   reservation   Reservation?     @relation(fields: [reservationId], references: [id])
+  @@index([stationId, startedAt])
+  @@index([reservationId])
+}
+
+model UsageEvent {
+  id            String         @id @default(cuid())
+  lotId         String
+  spotId        String?
+  eventType     String
+  recordedAt    DateTime       @default(now())
+  deltaAvailable Int?
+  occupancy     Int?
+  note          String?
+  metadata      String?
+  lot           ParkingLot     @relation(fields: [lotId], references: [id])
+  spot          ParkingSpot?   @relation(fields: [spotId], references: [id])
+  @@index([lotId, recordedAt])
+  @@index([spotId, recordedAt])
+}
+
+model LotDailyMetric {
+  id                    String   @id @default(cuid())
+  lotId                 String
+  date                  DateTime
+  reservationsCount     Int      @default(0)
+  chargingSessionsCount Int      @default(0)
+  energyKwh             Float?   @default(0)
+  revenueCents          Int?     @default(0)
+  avgOccupancyPercent   Float?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+  lot                   ParkingLot @relation(fields: [lotId], references: [id])
+  @@unique([lotId, date])
+  @@index([date])
+  @@index([lotId, date])
 }
 
 model Tariff {
-  id           String  @id @default(cuid())
-  name         String
-  pricePerHour Int
-  pricePerKwh  Float?
+  id             String   @id @default(cuid())
+  name           String
+  pricePerHour   Int
+  pricePerKwh    Float?
   peakMultiplier Float?
-  createdAt    DateTime @default(now())
+  createdAt      DateTime @default(now())
 }
 
 model Transaction {
-  id             String             @id @default(cuid())
-  reservationId  String?
-  amountCents    Int
-  currency       String             @default("INR")
-  status         String             @default("pending")
-  createdAt      DateTime           @default(now())
-  reservation    Reservation?       @relation(fields: [reservationId], references: [id])
+  id            String   @id @default(cuid())
+  reservationId String?
+  amountCents   Int
+  currency      String   @default("INR")
+  status        String   @default("pending")
+  createdAt     DateTime @default(now())
+  reservation   Reservation? @relation(fields: [reservationId], references: [id])
 }

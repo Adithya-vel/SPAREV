@@ -13,7 +13,7 @@ This repository includes a React + Vite + TypeScript frontend and an Express + T
 
 2) Environment variables
 - Copy `frontend/.env.example` to `frontend/.env` and adjust `VITE_API_BASE_URL` if needed.
-- Copy `backend/.env.example` to `backend/.env` and adjust `PORT`/`CORS_ORIGIN`. `DATABASE_URL` defaults to SQLite (`file:./dev.db`). To use Postgres, set `DATABASE_URL` to your Postgres connection string.
+- Copy `backend/.env.example` to `backend/.env`. By default it uses SQLite (`file:./dev.db`) so you don’t need to install a DB server. You can swap to Postgres/MySQL by changing `DATABASE_URL` and `provider` in `prisma/schema.prisma`.
 
 3) Initialize the database (from `backend`)
 - `npm run prisma:generate`
@@ -36,10 +36,12 @@ This repository includes a React + Vite + TypeScript frontend and an Express + T
   - `GET /api/health`
   - `GET /api/lots`
   - `GET /api/lots/:id/spots`
-  - `POST /api/reservations` with `{ lotId, spotId, vehiclePlate, userId? }`
-  - `GET /api/reservations/:id`
+  - `POST /api/reservations` with `{ lotId, spotId, vehiclePlate, userId?, startTime? }`
+  - `GET /api/reservations/:id` (includes event history and charging sessions)
   - `GET /api/charging-stations`
-  - `POST /api/charging-sessions` with `{ stationId, reservationId?, userId? }`
+  - `POST /api/charging-sessions` with `{ stationId, reservationId?, userId?, energyKwh?, cost? }`
+  - `GET /api/lots/:id/history` (time-series usage events)
+  - `GET /api/analytics/daily?days=7` (warehoused daily metrics per lot)
 - Frontend pages: Home, Availability (live data), Reservation (mock submit), Charging (roadmap), Admin (placeholder), Support, 404.
 
 ## Next steps
