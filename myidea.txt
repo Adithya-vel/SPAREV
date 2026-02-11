@@ -1,0 +1,6 @@
+Smart parking and EV charging management system
+it's an Data Base Management System(DBMS) subject focused project
+it's an website
+
+Tech stack:
+Use the best tech you wish that will be suitable for the project
