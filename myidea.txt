@@ -1,6 +1,29 @@
-Smart parking and EV charging management system
-it's an Data Base Management System(DBMS) subject focused project
-it's an website
+SPAREV - Smart Parking and EV Charging Management System
 
-Tech stack:
-Use the best tech you wish that will be suitable for the project
+Project Type:
+- Academic project for the Database Management Systems (DBMS) course.
+- Full-stack web application.
+
+Project Vision:
+Build an integrated platform that helps users find parking, reserve slots, and manage EV charging sessions in a simple and reliable way.
+
+Core Objectives:
+- Reduce parking search time through real-time availability.
+- Provide smooth reservation and charging workflows.
+- Track operational data for analytics and decision-making.
+- Demonstrate strong DBMS concepts through practical schema design and API usage.
+
+Primary Modules:
+- User-facing portal: browse lots, check availability, reserve a spot, view charging status.
+- Admin portal: monitor slots/stations, track reservations, and review usage insights.
+- Backend services: REST APIs, business logic, and database integration.
+- Shared models: common types/contracts for frontend-backend consistency.
+
+Suggested Technology Stack:
+- Frontend: React + TypeScript + Vite
+- Backend: Node.js + Express + TypeScript
+- Database & ORM: SQLite/PostgreSQL + Prisma
+- Tooling: ESLint, npm scripts, and modular project structure
+
+Expected Outcome:
+A professional, demo-ready smart parking and EV charging platform with scalable architecture, clear documentation, and a solid DBMS foundation.

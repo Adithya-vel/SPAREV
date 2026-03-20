@@ -1,50 +1,106 @@
-# Smart Parking & EV Web Stack
+# SPAREV - Smart Parking & EV Charging Platform
 
-This repository includes a React + Vite + TypeScript frontend and an Express + TypeScript backend with shared types. The backend uses in-memory data for quick demos (no payments implemented).
+SPAREV is a full-stack academic project built for DBMS coursework. It combines parking reservation and EV charging workflows into a single web platform with a modern frontend, typed backend APIs, and shared domain models.
+
+## Project Highlights
+- Real-time parking lot and spot visibility.
+- Reservation and charging session APIs.
+- Shared TypeScript types across frontend and backend.
+- Prisma-powered data layer with SQLite by default.
+- One-command local development workflow.
+
+## Tech Stack
+- Frontend: React, Vite, TypeScript
+- Backend: Node.js, Express, TypeScript
+- Database: Prisma ORM with SQLite (default)
+- Tooling: ESLint, tsx, npm scripts
 
 ## Prerequisites
-- Node.js 18+
+- Node.js 18 or newer
 - npm
 
-## Setup
-1) Install dependencies
-- Frontend: `cd frontend && npm install`
-- Backend: `cd backend && npm install`
+## Quick Start
+1. Install dependencies in all modules:
 
-2) Environment variables
-- Copy `frontend/.env.example` to `frontend/.env` and adjust `VITE_API_BASE_URL` if needed.
-- Copy `backend/.env.example` to `backend/.env`. By default it uses SQLite (`file:./dev.db`) so you don’t need to install a DB server. You can swap to Postgres/MySQL by changing `DATABASE_URL` and `provider` in `prisma/schema.prisma`.
+```bash
+cd backend && npm install
+cd ../frontend && npm install
+cd .. && npm install
+```
 
-3) Initialize the database (from `backend`)
-- `npm run prisma:generate`
-- `npm run db:push`
-- `npm run db:seed`
+2. Configure environment files:
+- Copy `backend/.env.example` to `backend/.env`.
+- Copy `frontend/.env.example` to `frontend/.env`.
 
-## Run
-- Backend (API on http://localhost:4000):
-  - `cd backend && npm run dev`
-- Frontend (Vite dev server on http://localhost:5173):
-  - Open a new terminal: `cd frontend && npm run dev`
+3. Initialize the database (from `backend`):
 
-## Build
-- Backend: `cd backend && npm run build`
-- Frontend: `cd frontend && npm run build`
+```bash
+cd backend
+npm run prisma:generate
+npm run db:push
+npm run db:seed
+cd ..
+```
 
-## Notes
-- Shared domain types live in `shared/types.ts` and are imported by both apps.
-- API endpoints available:
-  - `GET /api/health`
-  - `GET /api/lots`
-  - `GET /api/lots/:id/spots`
-  - `POST /api/reservations` with `{ lotId, spotId, vehiclePlate, userId?, startTime? }`
-  - `GET /api/reservations/:id` (includes event history and charging sessions)
-  - `GET /api/charging-stations`
-  - `POST /api/charging-sessions` with `{ stationId, reservationId?, userId?, energyKwh?, cost? }`
-  - `GET /api/lots/:id/history` (time-series usage events)
-  - `GET /api/analytics/daily?days=7` (warehoused daily metrics per lot)
-- Frontend pages: Home, Availability (live data), Reservation (mock submit), Charging (roadmap), Admin (placeholder), Support, 404.
+4. Run everything with one command (from project root):
 
-## Next steps
-- Wire Reservation page to `POST /api/reservations` and show confirmation.
-- Add real persistence (DB) and auth before production use.
-- Expand tests and linting as the codebase grows.
+```bash
+npm run dev
+```
+
+This starts:
+- Backend API: http://localhost:4000
+- Frontend App: http://localhost:5173
+
+## Available Scripts
+
+### Root
+- `npm run dev` - Runs backend and frontend together.
+- `npm run dev:backend` - Runs backend only.
+- `npm run dev:frontend` - Runs frontend only.
+
+### Backend (`backend/`)
+- `npm run dev` - Start backend in development mode.
+- `npm run build` - Build backend TypeScript.
+- `npm run start` - Start compiled backend.
+- `npm run db:push` - Apply Prisma schema to DB.
+- `npm run db:seed` - Seed database with sample data.
+- `npm run prisma:generate` - Generate Prisma client.
+
+### Frontend (`frontend/`)
+- `npm run dev` - Start Vite development server.
+- `npm run build` - Build production frontend bundle.
+- `npm run preview` - Preview production build.
+
+## Core API Endpoints
+- `GET /api/health`
+- `GET /api/lots`
+- `GET /api/lots/:id/spots`
+- `POST /api/reservations`
+- `GET /api/reservations/:id`
+- `GET /api/charging-stations`
+- `POST /api/charging-sessions`
+- `GET /api/lots/:id/history`
+- `GET /api/analytics/daily?days=7`
+
+## Current Frontend Pages
+- Home
+- Availability
+- Reservation
+- Charging
+- Analytics
+- Admin
+- Support
+- Not Found (404)
+
+## Academic Scope
+This project demonstrates:
+- Relational modeling and schema design for parking and charging domains.
+- API design with typed contracts and modular services.
+- Frontend-backend integration for real-world DBMS workflows.
+
+## Next Improvements
+- Add authentication and role-based access control.
+- Complete reservation submission and confirmation UX.
+- Integrate payment workflow for charging sessions.
+- Expand automated tests for API and UI flows.
