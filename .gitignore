@@ -6,3 +6,6 @@ dist
 .env.*
 backend/prisma/dev.db
 backend/prisma/*.db
+frontend/node_modules/.vite/
+backend/dev.db
+shared/types.js
