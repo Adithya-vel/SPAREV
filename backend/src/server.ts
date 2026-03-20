@@ -1,19 +1,14 @@
 import "dotenv/config";
 import cors from "cors";
 import express, { type NextFunction, type Request, type Response } from "express";
+import type { Prisma, PrismaClient } from "@prisma/client";
 import prisma from "./prisma";
-
-type MetricClient = {
-  lotDailyMetric: {
-    upsert: typeof prisma.lotDailyMetric.upsert;
-  };
-};
 
 function startOfDayUtc(date = new Date()) {
   return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
 }
 
-async function upsertLotDailyMetric(client: MetricClient, lotId: string, date: Date, updates: {
+async function upsertLotDailyMetric(client: PrismaClient | Prisma.TransactionClient, lotId: string, date: Date, updates: {
   reservationsDelta?: number;
   chargingSessionsDelta?: number;
   energyKwhDelta?: number;

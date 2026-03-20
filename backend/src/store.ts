@@ -5,7 +5,7 @@ import type {
   Reservation,
   ChargingStation,
   ChargingSession
-} from "@shared/types";
+} from "./types";
 
 export const lots: ParkingLot[] = [
   {
