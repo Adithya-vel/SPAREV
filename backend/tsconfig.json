@@ -4,7 +4,7 @@
     "module": "ESNext",
     "moduleResolution": "Node",
     "outDir": "dist",
-    "rootDir": "src",
+    "rootDir": "..",
     "resolveJsonModule": true,
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true,
@@ -14,6 +14,6 @@
       "@shared/*": ["../shared/*"]
     }
   },
-  "include": ["src"],
-  "exclude": ["node_modules", "src/store.ts"]
+  "include": ["src", "../shared/types.ts"],
+  "exclude": ["node_modules"]
 }
