@@ -11,46 +11,55 @@ const Analytics = () => {
 
   const evCount = slots.filter((s) => s.type === "EV").length;
   const parkingCount = slots.filter((s) => s.type === "Parking").length;
+  const occupancyPercent = total === 0 ? 0 : Math.round((occupied / total) * 100);
+  const availabilityPercent = total === 0 ? 0 : 100 - occupancyPercent;
 
   return (
-    <PageContainer title="System Analytics">
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
-          gap: "14px",
-        }}
-      >
+    <PageContainer title="System Analytics" subtitle="Understand occupancy and reservation flow at a glance.">
+      <div className="grid three">
         <Card>
-          <h3>Total Slots</h3>
-          <h1>{total}</h1>
+          <p className="kpi-label">Total Slots</p>
+          <p className="kpi-value">{total}</p>
         </Card>
 
         <Card>
-          <h3>Available</h3>
-          <h1>{available}</h1>
+          <p className="kpi-label">Available</p>
+          <p className="kpi-value">{available}</p>
         </Card>
 
         <Card>
-          <h3>Occupied</h3>
-          <h1>{occupied}</h1>
+          <p className="kpi-label">Occupied</p>
+          <p className="kpi-value">{occupied}</p>
         </Card>
 
         <Card>
-          <h3>Total Reservations</h3>
-          <h1>{reservations.length}</h1>
+          <p className="kpi-label">Total Reservations</p>
+          <p className="kpi-value">{reservations.length}</p>
         </Card>
 
         <Card>
-          <h3>EV Chargers</h3>
-          <h1>{evCount}</h1>
+          <p className="kpi-label">EV Chargers</p>
+          <p className="kpi-value">{evCount}</p>
         </Card>
 
         <Card>
-          <h3>Parking Slots</h3>
-          <h1>{parkingCount}</h1>
+          <p className="kpi-label">Parking Slots</p>
+          <p className="kpi-value">{parkingCount}</p>
         </Card>
       </div>
+
+      <Card>
+        <h3>Occupancy Balance</h3>
+        <div className="meter">
+          <div className="meter-fill warm" style={{ width: `${occupancyPercent}%` }} />
+        </div>
+        <p className="muted-note">Occupied: {occupancyPercent}%</p>
+
+        <div className="meter">
+          <div className="meter-fill cool" style={{ width: `${availabilityPercent}%` }} />
+        </div>
+        <p className="muted-note">Available: {availabilityPercent}%</p>
+      </Card>
     </PageContainer>
   );
 };

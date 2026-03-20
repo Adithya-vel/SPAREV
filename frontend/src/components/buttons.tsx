@@ -1,20 +1,14 @@
 interface ButtonProps {
   text: string;
   onClick?: () => void;
+  className?: string;
 }
 
-const Button = ({ text, onClick }: ButtonProps) => {
+const Button = ({ text, onClick, className = "" }: ButtonProps) => {
   return (
     <button
       onClick={onClick}
-      style={{
-        padding: "10px 16px",
-        backgroundColor: "#2563eb",
-        color: "#fff",
-        border: "none",
-        borderRadius: "6px",
-        cursor: "pointer",
-      }}
+      className={`button ${className}`.trim()}
     >
       {text}
     </button>

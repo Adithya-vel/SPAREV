@@ -40,68 +40,47 @@ const Admin = () => {
   }, [slots, reservations]);
 
   return (
-    <PageContainer title="Admin Dashboard">
-      {/* RESET BUTTON */}
-      <div style={{ marginBottom: "14px" }}>
+    <PageContainer title="Admin Dashboard" subtitle="Control occupancy, monitor slot health, and handle system resets.">
+      <div>
         <button
           onClick={() => {
-            if (
-              confirm("Reset everything? This will clear all reservations.")
-            ) {
+            if (confirm("Reset everything? This will clear all reservations.")) {
               resetSystem();
             }
           }}
-          style={{
-            background: "#dc2626",
-            color: "white",
-            padding: "10px 16px",
-            borderRadius: "6px",
-            border: "none",
-            cursor: "pointer",
-          }}
+          className="button button-danger"
         >
-          🔄 Reset System
+          Reset System
         </button>
       </div>
 
-      {/* STATS */}
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
-          gap: "12px",
-          marginBottom: "16px",
-        }}
-      >
+      <div className="grid three">
         <Card>
-          <strong>Total Slots</strong>
-          <h2>{stats.total}</h2>
+          <p className="kpi-label">Total Slots</p>
+          <p className="kpi-value">{stats.total}</p>
         </Card>
 
         <Card>
-          <strong>Available</strong>
-          <h2>{stats.available}</h2>
+          <p className="kpi-label">Available</p>
+          <p className="kpi-value">{stats.available}</p>
         </Card>
 
         <Card>
-          <strong>Occupied</strong>
-          <h2>{stats.occupied}</h2>
+          <p className="kpi-label">Occupied</p>
+          <p className="kpi-value">{stats.occupied}</p>
         </Card>
 
         <Card>
-          <strong>Reservations</strong>
-          <h2>{stats.reservations}</h2>
+          <p className="kpi-label">Reservations</p>
+          <p className="kpi-value">{stats.reservations}</p>
         </Card>
       </div>
 
-      {/* FILTERS */}
       <Card>
-        <div style={{ display: "flex", gap: "12px", flexWrap: "wrap" }}>
+        <div className="button-row">
           <select
             value={typeFilter}
-            onChange={(e) =>
-              setTypeFilter(e.target.value as any)
-            }
+            onChange={(e) => setTypeFilter(e.target.value as "All" | "Parking" | "EV")}
           >
             <option value="All">All Types</option>
             <option value="Parking">Parking</option>
@@ -110,9 +89,7 @@ const Admin = () => {
 
           <select
             value={statusFilter}
-            onChange={(e) =>
-              setStatusFilter(e.target.value as any)
-            }
+            onChange={(e) => setStatusFilter(e.target.value as "All" | "Available" | "Occupied")}
           >
             <option value="All">All Status</option>
             <option value="Available">Available</option>
@@ -121,18 +98,10 @@ const Admin = () => {
         </div>
       </Card>
 
-      {/* SLOT LIST */}
-      <div style={{ display: "grid", gap: "12px" }}>
+      <div className="stack compact">
         {filteredSlots.map((s) => (
           <Card key={s.id}>
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                gap: "12px",
-              }}
-            >
+            <div className="list-item no-border">
               <div>
                 <strong>
                   {s.type} {s.id}
@@ -140,7 +109,7 @@ const Admin = () => {
                 <div>Status: {s.status}</div>
               </div>
 
-              <div style={{ display: "flex", gap: "10px" }}>
+              <div className="button-row">
                 {s.status === "Occupied" ? (
                   <button onClick={() => releaseSlot(s.id)}>
                     Mark Available
@@ -164,27 +133,15 @@ const Admin = () => {
         )}
       </div>
 
-      {/* RESERVATIONS */}
       <Card>
-        <h3 style={{ marginTop: 0 }}>All Reservations</h3>
+        <h3>All Reservations</h3>
 
         {reservations.length === 0 ? (
           <p>No reservations.</p>
         ) : (
-          <div style={{ display: "grid", gap: "10px" }}>
+          <div className="stack compact">
             {reservations.map((r) => (
-              <div
-                key={r.id}
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  gap: "12px",
-                  border: "1px solid #1e293b",
-                  borderRadius: "8px",
-                  padding: "10px",
-                }}
-              >
+              <div key={r.id} className="list-item">
                 <div>
                   <strong>Slot:</strong> {r.slotId} <br />
                   <strong>Date:</strong> {r.date} <br />

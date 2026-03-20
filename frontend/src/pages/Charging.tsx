@@ -71,10 +71,10 @@ const Charging = () => {
   };
 
   return (
-    <PageContainer title="EV Charging">
-      <div style={{ display: "grid", gap: "16px", width: "100%" }}>
+    <PageContainer title="EV Charging" subtitle="Start and track active charging sessions in real time.">
+      <div className="grid two">
         <Card>
-          <h3 style={{ marginTop: 0 }}>Select Charger</h3>
+          <h3>Select Charger</h3>
 
           <select value={selected} onChange={(e) => setSelected(e.target.value)}>
             <option value="">Select EV Charger</option>
@@ -85,7 +85,7 @@ const Charging = () => {
             ))}
           </select>
 
-          <div style={{ display: "flex", gap: "10px", marginTop: "12px" }}>
+          <div className="button-row">
             <button type="button" onClick={startCharging} disabled={isCharging}>
               Start Charging
             </button>
@@ -95,31 +95,21 @@ const Charging = () => {
             </button>
           </div>
 
-          {msg && <p style={{ marginTop: "10px" }}>{msg}</p>}
+          {msg && <div className={msg.startsWith("❌") ? "alert error" : "alert success"}>{msg}</div>}
         </Card>
 
         <Card>
-          <h3 style={{ marginTop: 0 }}>Live Session</h3>
+          <h3>Live Session</h3>
 
-          <p>
-            <strong>Status:</strong> {isCharging ? "Charging ⚡" : "Idle"}
-          </p>
-          <p>
-            <strong>Time:</strong> {minutes} min ({seconds}s)
-          </p>
-          <p>
-            <strong>Power:</strong> {POWER_KW} kW
-          </p>
-          <p>
-            <strong>Energy Used:</strong> {energyKwh.toFixed(2)} kWh
-          </p>
-          <p>
-            <strong>Estimated Cost:</strong> ₹{cost.toFixed(0)}
-          </p>
+          <div className="stats-list">
+            <p><strong>Status:</strong> {isCharging ? "Charging" : "Idle"}</p>
+            <p><strong>Time:</strong> {minutes} min ({seconds}s)</p>
+            <p><strong>Power:</strong> {POWER_KW} kW</p>
+            <p><strong>Energy Used:</strong> {energyKwh.toFixed(2)} kWh</p>
+            <p><strong>Estimated Cost:</strong> ₹{cost.toFixed(0)}</p>
+          </div>
 
-          <p style={{ opacity: 0.8, marginTop: "10px" }}>
-            Demo rate: ₹{RATE_PER_KWH}/kWh
-          </p>
+          <p className="muted-note">Demo rate: ₹{RATE_PER_KWH}/kWh</p>
         </Card>
       </div>
     </PageContainer>

@@ -25,12 +25,12 @@ const Reservation = () => {
   };
 
   return (
-    <PageContainer title="Reservation">
-      <div style={{ display: "grid", gap: "16px", width: "100%" }}>
+    <PageContainer title="Reservation Desk" subtitle="Book, review, and cancel reservations from one place.">
+      <div className="stack">
         <Card>
-          <h3 style={{ marginTop: 0 }}>Book a Slot</h3>
+          <h3>Book a Slot</h3>
 
-          <form onSubmit={handleSubmit} style={{ display: "grid", gap: "12px" }}>
+          <form onSubmit={handleSubmit} className="form">
             <select value={slotId} onChange={(e) => setSlotId(e.target.value)}>
               <option value="">Select Slot</option>
               {slots.map((s) => (
@@ -46,29 +46,18 @@ const Reservation = () => {
             <button type="submit">Reserve</button>
           </form>
 
-          {message && <p style={{ marginTop: "10px" }}>{message}</p>}
+          {message && <div className={message.startsWith("❌") ? "alert error" : "alert success"}>{message}</div>}
         </Card>
 
         <Card>
-          <h3 style={{ marginTop: 0 }}>My Reservations</h3>
+          <h3>My Reservations</h3>
 
           {reservations.length === 0 ? (
             <p>No reservations yet.</p>
           ) : (
-            <div style={{ display: "grid", gap: "10px" }}>
+            <div className="stack compact">
               {reservations.map((r) => (
-                <div
-                  key={r.id}
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    gap: "12px",
-                    alignItems: "center",
-                    border: "1px solid #1e293b",
-                    borderRadius: "8px",
-                    padding: "10px",
-                  }}
-                >
+                <div key={r.id} className="list-item">
                   <div>
                     <strong>Slot:</strong> {r.slotId} <br />
                     <strong>Date:</strong> {r.date} <br />
