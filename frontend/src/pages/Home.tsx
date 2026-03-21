@@ -4,8 +4,9 @@ import Card from "../components/card";
 import { useSlots } from "../context/SlotContext";
 
 const Home = () => {
-  const { slots, reservations } = useSlots();
-  const available = slots.filter((slot) => slot.status === "Available").length;
+  const { slots, reservations, lots, getSlotStatus, chargingSessions } = useSlots();
+  const available = slots.filter((slot) => getSlotStatus(slot.id) === "Available").length;
+  const activeCharging = chargingSessions.filter((session) => session.status === "active").length;
 
   return (
     <PageContainer
@@ -28,16 +29,20 @@ const Home = () => {
 
         <div className="grid three reveal-up-delay">
           <Card>
-            <p className="kpi-label">Total Slots</p>
-            <p className="kpi-value">{slots.length}</p>
+            <p className="kpi-label">Total Lots</p>
+            <p className="kpi-value">{lots.length}</p>
           </Card>
           <Card>
-            <p className="kpi-label">Available Now</p>
+            <p className="kpi-label">Available Spots</p>
             <p className="kpi-value">{available}</p>
           </Card>
           <Card>
+            <p className="kpi-label">Live EV Sessions</p>
+            <p className="kpi-value">{activeCharging}</p>
+          </Card>
+          <Card>
             <p className="kpi-label">Reservations</p>
-            <p className="kpi-value">{reservations.length}</p>
+            <p className="kpi-value">{reservations.filter((r) => r.source === "reservation").length}</p>
           </Card>
         </div>
       </section>

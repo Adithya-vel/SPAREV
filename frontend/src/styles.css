@@ -279,6 +279,11 @@ button:disabled {
   color: var(--success);
 }
 
+.badge.warn {
+  background: #fff3df;
+  color: #9a5b1f;
+}
+
 .badge.danger {
   background: #fde8e8;
   color: var(--danger);

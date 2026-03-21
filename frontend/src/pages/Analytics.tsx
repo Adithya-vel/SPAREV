@@ -3,20 +3,27 @@ import Card from "../components/card";
 import { useSlots } from "../context/SlotContext";
 
 const Analytics = () => {
-  const { slots, reservations } = useSlots();
+  const { lots, slots, reservations, chargingSessions, getSlotStatus } = useSlots();
 
   const total = slots.length;
-  const available = slots.filter((s) => s.status === "Available").length;
-  const occupied = slots.filter((s) => s.status === "Occupied").length;
+  const available = slots.filter((s) => getSlotStatus(s.id) === "Available").length;
+  const occupied = slots.filter((s) => getSlotStatus(s.id) === "Occupied").length;
+  const reserved = slots.filter((s) => getSlotStatus(s.id) === "Reserved").length;
 
   const evCount = slots.filter((s) => s.type === "EV").length;
   const parkingCount = slots.filter((s) => s.type === "Parking").length;
   const occupancyPercent = total === 0 ? 0 : Math.round((occupied / total) * 100);
-  const availabilityPercent = total === 0 ? 0 : 100 - occupancyPercent;
+  const availabilityPercent = total === 0 ? 0 : Math.round((available / total) * 100);
+  const activeCharging = chargingSessions.filter((s) => s.status === "active").length;
 
   return (
     <PageContainer title="System Analytics" subtitle="Understand occupancy and reservation flow at a glance.">
       <div className="grid three">
+        <Card>
+          <p className="kpi-label">Lots</p>
+          <p className="kpi-value">{lots.length}</p>
+        </Card>
+
         <Card>
           <p className="kpi-label">Total Slots</p>
           <p className="kpi-value">{total}</p>
@@ -33,8 +40,13 @@ const Analytics = () => {
         </Card>
 
         <Card>
-          <p className="kpi-label">Total Reservations</p>
-          <p className="kpi-value">{reservations.length}</p>
+          <p className="kpi-label">Reserved (Upcoming)</p>
+          <p className="kpi-value">{reserved}</p>
+        </Card>
+
+        <Card>
+          <p className="kpi-label">Reservations</p>
+          <p className="kpi-value">{reservations.filter((r) => r.source === "reservation").length}</p>
         </Card>
 
         <Card>
@@ -45,6 +57,11 @@ const Analytics = () => {
         <Card>
           <p className="kpi-label">Parking Slots</p>
           <p className="kpi-value">{parkingCount}</p>
+        </Card>
+
+        <Card>
+          <p className="kpi-label">Live Charging Sessions</p>
+          <p className="kpi-value">{activeCharging}</p>
         </Card>
       </div>
 

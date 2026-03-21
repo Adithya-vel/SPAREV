@@ -6,18 +6,19 @@ SPAREV is a full-stack academic project built for DBMS coursework. It combines p
 - Real-time parking lot and spot visibility.
 - Reservation and charging session APIs.
 - Shared TypeScript types across frontend and backend.
-- Prisma-powered data layer with SQLite by default.
+- Prisma-powered data layer with MySQL support for local development.
 - One-command local development workflow.
 
 ## Tech Stack
 - Frontend: React, Vite, TypeScript
 - Backend: Node.js, Express, TypeScript
-- Database: Prisma ORM with SQLite (default)
+- Database: Prisma ORM with MySQL
 - Tooling: ESLint, tsx, npm scripts
 
 ## Prerequisites
 - Node.js 18 or newer
 - npm
+- MySQL Server 8+ (local)
 
 ## Quick Start
 1. Install dependencies in all modules:
@@ -31,8 +32,21 @@ cd .. && npm install
 2. Configure environment files:
 - Copy `backend/.env.example` to `backend/.env`.
 - Copy `frontend/.env.example` to `frontend/.env`.
+- In `backend/.env`, set `DATABASE_URL` with your local MySQL credentials.
 
-3. Initialize the database (from `backend`):
+Example:
+
+```bash
+DATABASE_URL="mysql://root:your_password@localhost:3306/sparev"
+```
+
+3. Create the database in MySQL:
+
+```sql
+CREATE DATABASE sparev;
+```
+
+4. Initialize the database (from `backend`):
 
 ```bash
 cd backend
@@ -42,7 +56,7 @@ npm run db:seed
 cd ..
 ```
 
-4. Run everything with one command (from project root):
+5. Run everything with one command (from project root):
 
 ```bash
 npm run dev
@@ -64,7 +78,9 @@ This starts:
 - `npm run build` - Build backend TypeScript.
 - `npm run start` - Start compiled backend.
 - `npm run db:push` - Apply Prisma schema to DB.
+- `npm run db:migrate` - Create and apply Prisma migrations.
 - `npm run db:seed` - Seed database with sample data.
+- `npm run db:studio` - Open Prisma Studio to add/edit/delete rows in browser.
 - `npm run prisma:generate` - Generate Prisma client.
 
 ### Frontend (`frontend/`)
