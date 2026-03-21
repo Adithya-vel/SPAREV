@@ -141,6 +141,11 @@ const Admin = () => {
     }
   };
 
+  const managedSpots = useMemo(
+    () => spots.filter((spot) => spot.adminStatus && spot.adminStatus !== "available"),
+    [spots]
+  );
+
   return (
     <PageContainer title="Admin Control Room" subtitle="Update-only operations: reserve, mark occupied, set under-repair, and assign VIP spots.">
       <div className="button-row">
@@ -251,6 +256,34 @@ const Admin = () => {
                 </div>
               );
             })}
+
+            {managedSpots.length > 0 && (
+              <div
+                className="stack compact"
+                style={{
+                  marginTop: "1rem",
+                  padding: "0.75rem",
+                  border: "1px solid rgba(255,255,255,0.14)",
+                  borderRadius: "12px"
+                }}
+              >
+                <h4>Managed Spots (shown until set to Available)</h4>
+                {managedSpots.map((spot) => {
+                  const currentStatus = defaultStatus(spot);
+                  const option = statusOptions.find((item) => item.value === currentStatus) ?? statusOptions[0];
+
+                  return (
+                    <div key={`managed-${spot.id}`} className="list-item">
+                      <div>
+                        <strong>{spot.label}</strong>
+                        <div>{spot.supportsEv ? "EV" : "Parking"}</div>
+                      </div>
+                      <span className={`badge ${option.badge}`}>{option.label}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         </Card>
       )}
