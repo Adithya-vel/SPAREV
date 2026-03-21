@@ -1,58 +1,42 @@
 import { useEffect, useMemo, useState } from "react";
 import PageContainer from "../components/pagecontainer";
 import Card from "../components/card";
-import type { ChargingStation, ParkingLot, ParkingSpot } from "@shared/types";
-import {
-  createChargingStation,
-  createLot,
-  createSpot,
-  deleteChargingStation,
-  deleteLot,
-  deleteSpot,
-  fetchAdminLots,
-  fetchChargingStations,
-  fetchSpots
-} from "../api/client";
+import type { ParkingLot, ParkingSpot, SpotAdminStatus } from "@shared/types";
+import { fetchAdminLots, fetchSpots, updateSpot } from "../api/client";
 
 type AdminLot = ParkingLot & {
   _count: { spots: number; chargingStations: number; reservations: number };
 };
 
-const standardLots = [
-  { name: "North Atrium", address: "Block A" },
-  { name: "Library Deck", address: "Central Library" },
-  { name: "Sports Hub", address: "Stadium Wing" },
-  { name: "Innovation Yard", address: "Tech Park" }
+type SpotDraft = {
+  label: string;
+  status: SpotAdminStatus;
+};
+
+const statusOptions: Array<{ value: SpotAdminStatus; label: string; badge: string }> = [
+  { value: "available", label: "Available", badge: "success" },
+  { value: "reserved", label: "Reserved", badge: "warn" },
+  { value: "occupied", label: "Occupied", badge: "danger" },
+  { value: "under_repair", label: "Under Repair", badge: "danger" },
+  { value: "vip", label: "VIP Only", badge: "warn" }
 ];
+
+const defaultStatus = (spot: ParkingSpot): SpotAdminStatus => {
+  if (spot.adminStatus) {
+    return spot.adminStatus;
+  }
+  return spot.isAvailable ? "available" : "occupied";
+};
 
 const Admin = () => {
   const [lots, setLots] = useState<AdminLot[]>([]);
   const [spots, setSpots] = useState<ParkingSpot[]>([]);
-  const [stations, setStations] = useState<ChargingStation[]>([]);
   const [selectedLotId, setSelectedLotId] = useState("");
   const [loading, setLoading] = useState(false);
+  const [savingSpotId, setSavingSpotId] = useState("");
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
-
-  const [lotForm, setLotForm] = useState({
-    name: "",
-    address: "",
-    pricePerHour: 20,
-    distanceMeters: 100
-  });
-
-  const [spotForm, setSpotForm] = useState({
-    label: "",
-    supportsEv: false,
-    isAvailable: true
-  });
-
-  const [stationForm, setStationForm] = useState({
-    name: "",
-    connectorType: "CCS2",
-    maxKw: 50,
-    isAvailable: true
-  });
+  const [spotDrafts, setSpotDrafts] = useState<Record<string, SpotDraft>>({});
 
   const showSuccess = (message: string) => {
     setSuccess(message);
@@ -69,7 +53,7 @@ const Admin = () => {
       const nextSelected =
         preferredLotId && data.some((lot) => lot.id === preferredLotId)
           ? preferredLotId
-          : data[0]?.id ?? "";
+          : "";
       setSelectedLotId(nextSelected);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load lots");
@@ -81,18 +65,25 @@ const Admin = () => {
   const loadLotDetails = async (lotId: string) => {
     if (!lotId) {
       setSpots([]);
-      setStations([]);
+      setSpotDrafts({});
       return;
     }
 
     setError("");
     try {
-      const [spotList, stationList] = await Promise.all([
-        fetchSpots(lotId),
-        fetchChargingStations()
-      ]);
+      const spotList = await fetchSpots(lotId);
       setSpots(spotList);
-      setStations(stationList.filter((station) => station.lotId === lotId));
+      setSpotDrafts(
+        Object.fromEntries(
+          spotList.map((spot) => [
+            spot.id,
+            {
+              label: spot.label,
+              status: defaultStatus(spot)
+            }
+          ])
+        )
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load lot details");
     }
@@ -114,158 +105,45 @@ const Admin = () => {
     return { totalLots, totalSpots, totalChargers, totalReservations };
   }, [lots]);
 
-  const handleCreateLot = async () => {
-    setError("");
-    try {
-      const created = await createLot({
-        name: lotForm.name,
-        address: lotForm.address,
-        totalSpots: 0,
-        pricePerHour: Number(lotForm.pricePerHour),
-        hasEvCharging: false,
-        distanceMeters: Number(lotForm.distanceMeters),
-        timezone: "Asia/Kolkata"
-      });
-      setLotForm({ name: "", address: "", pricePerHour: 20, distanceMeters: 100 });
-      await loadLots(created.id);
-      showSuccess("Lot created");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to create lot");
-    }
-  };
-
-  const handleDeleteLot = async (lotId: string) => {
-    if (!confirm("Delete lot and all related data?")) {
-      return;
-    }
-    setError("");
-    try {
-      await deleteLot(lotId);
-      await loadLots();
-      showSuccess("Lot deleted");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to delete lot");
-    }
-  };
-
-  const handleCreateSpot = async () => {
-    if (!selectedLotId) {
-      setError("Select a lot first");
-      return;
-    }
-
-    setError("");
-    try {
-      await createSpot({
-        lotId: selectedLotId,
-        label: spotForm.label,
-        isAvailable: spotForm.isAvailable,
-        supportsEv: spotForm.supportsEv
-      });
-      setSpotForm({ label: "", supportsEv: false, isAvailable: true });
-      await Promise.all([loadLots(selectedLotId), loadLotDetails(selectedLotId)]);
-      showSuccess("Spot created");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to create spot");
-    }
-  };
-
-  const handleDeleteSpot = async (spotId: string) => {
-    if (!confirm("Delete this spot and linked reservations?")) {
-      return;
-    }
-    setError("");
-    try {
-      await deleteSpot(spotId);
-      await Promise.all([loadLots(selectedLotId), loadLotDetails(selectedLotId)]);
-      showSuccess("Spot deleted");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to delete spot");
-    }
-  };
-
-  const handleCreateStation = async () => {
-    if (!selectedLotId) {
-      setError("Select a lot first");
-      return;
-    }
-
-    setError("");
-    try {
-      await createChargingStation({
-        lotId: selectedLotId,
-        name: stationForm.name,
-        connectorType: stationForm.connectorType,
-        maxKw: Number(stationForm.maxKw),
-        isAvailable: stationForm.isAvailable
-      });
-      setStationForm({ name: "", connectorType: "CCS2", maxKw: 50, isAvailable: true });
-      await Promise.all([loadLots(selectedLotId), loadLotDetails(selectedLotId)]);
-      showSuccess("Charging station created");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to create station");
-    }
-  };
-
-  const handleDeleteStation = async (stationId: string) => {
-    if (!confirm("Delete this charging station?")) {
-      return;
-    }
-
-    setError("");
-    try {
-      await deleteChargingStation(stationId);
-      await Promise.all([loadLots(selectedLotId), loadLotDetails(selectedLotId)]);
-      showSuccess("Charging station deleted");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to delete station");
-    }
-  };
-
-  const handleGenerateStandardLayout = async () => {
-    if (!confirm("Create 4 lots with 7 spots each (2 EV spots in each lot)?")) {
-      return;
-    }
-
-    setLoading(true);
-    setError("");
-    try {
-      for (const lotTemplate of standardLots) {
-        const lot = await createLot({
-          name: lotTemplate.name,
-          address: lotTemplate.address,
-          totalSpots: 0,
-          pricePerHour: 25,
-          distanceMeters: 120,
-          timezone: "Asia/Kolkata"
-        });
-
-        for (let i = 1; i <= 7; i += 1) {
-          await createSpot({
-            lotId: lot.id,
-            label: `${lot.name.slice(0, 1)}-${i}`,
-            isAvailable: true,
-            supportsEv: i <= 2
-          });
-        }
+  const updateDraft = (spotId: string, patch: Partial<SpotDraft>) => {
+    setSpotDrafts((prev) => {
+      const current = prev[spotId];
+      if (!current) {
+        return prev;
       }
+      return { ...prev, [spotId]: { ...current, ...patch } };
+    });
+  };
 
-      await loadLots();
-      showSuccess("Standard 4x7 layout created");
+  const handleSaveSpot = async (spot: ParkingSpot) => {
+    const draft = spotDrafts[spot.id];
+    if (!draft) {
+      return;
+    }
+
+    setError("");
+    setSavingSpotId(spot.id);
+
+    try {
+      await updateSpot(spot.id, {
+        label: draft.label.trim() || spot.label,
+        adminStatus: draft.status,
+        isAvailable: draft.status === "available"
+      });
+
+      await loadLotDetails(selectedLotId);
+      showSuccess(`Updated ${draft.label || spot.label}`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to create standard layout");
+      setError(err instanceof Error ? err.message : "Failed to update spot");
     } finally {
-      setLoading(false);
+      setSavingSpotId("");
     }
   };
 
   return (
-    <PageContainer title="Admin Control Room" subtitle="Clean operations board for lots, spots, and EV chargers.">
+    <PageContainer title="Admin Control Room" subtitle="Update-only operations: reserve, mark occupied, set under-repair, and assign VIP spots.">
       <div className="button-row">
         <button onClick={() => void loadLots(selectedLotId)} disabled={loading}>Refresh</button>
-        <button className="button button-ghost" onClick={() => void handleGenerateStandardLayout()} disabled={loading}>
-          Create 4 Lots x 7 Spots Template
-        </button>
       </div>
 
       <div className="grid three">
@@ -287,146 +165,91 @@ const Admin = () => {
         </Card>
       </div>
 
-      <div className="grid two">
-        <Card>
-          <h3>Create Lot</h3>
-          <div className="form">
-            <input
-              value={lotForm.name}
-              onChange={(e) => setLotForm((prev) => ({ ...prev, name: e.target.value }))}
-              placeholder="Lot name"
-            />
-            <input
-              value={lotForm.address}
-              onChange={(e) => setLotForm((prev) => ({ ...prev, address: e.target.value }))}
-              placeholder="Address"
-            />
-            <input
-              type="number"
-              value={lotForm.pricePerHour}
-              onChange={(e) => setLotForm((prev) => ({ ...prev, pricePerHour: Number(e.target.value) }))}
-              placeholder="Price per hour"
-            />
-            <input
-              type="number"
-              value={lotForm.distanceMeters}
-              onChange={(e) => setLotForm((prev) => ({ ...prev, distanceMeters: Number(e.target.value) }))}
-              placeholder="Distance (m)"
-            />
-            <button onClick={() => void handleCreateLot()} disabled={!lotForm.name || !lotForm.address}>Create Lot</button>
-          </div>
-        </Card>
-
-        <Card>
-          <h3>Lots</h3>
-          <div className="stack compact">
-            {lots.length === 0 && <p>No lots found.</p>}
-            {lots.map((lot) => (
-              <div key={lot.id} className="list-item">
-                <div>
-                  <strong>{lot.name}</strong>
-                  <div>{lot.address}</div>
-                  <div>Spots: {lot._count.spots} | Chargers: {lot._count.chargingStations}</div>
-                </div>
-                <div className="button-row" style={{ marginTop: 0 }}>
-                  <button className="button button-ghost" onClick={() => setSelectedLotId(lot.id)}>Manage</button>
-                  <button className="button button-danger" onClick={() => void handleDeleteLot(lot.id)}>Delete</button>
-                </div>
-              </div>
-            ))}
-          </div>
-        </Card>
-      </div>
-
       <Card>
-        <h3>Lot Workspace</h3>
-        {!selectedLotId ? (
-          <p>Select a lot to manage spots and chargers.</p>
-        ) : (
-          <div className="grid two" style={{ marginTop: "0.8rem" }}>
-            <div className="stack">
-              <Card>
-                <h3>Add Spot</h3>
-                <div className="form">
-                  <input
-                    value={spotForm.label}
-                    onChange={(e) => setSpotForm((prev) => ({ ...prev, label: e.target.value }))}
-                    placeholder="Spot label"
-                  />
-                  <div className="button-row">
-                    <button
-                      type="button"
-                      className="button button-ghost"
-                      onClick={() => setSpotForm((prev) => ({ ...prev, supportsEv: !prev.supportsEv }))}
-                    >
-                      {spotForm.supportsEv ? "EV Spot" : "Parking Spot"}
-                    </button>
-                    <button onClick={() => void handleCreateSpot()} disabled={!spotForm.label}>Add Spot</button>
+        <h3>Lots</h3>
+        <div className="stack compact">
+          {lots.length === 0 && <p>No lots found.</p>}
+          {lots.map((lot) => (
+            <div key={lot.id} className="list-item">
+              <div>
+                <strong>{lot.name}</strong>
+                <div>{lot.address}</div>
+                <div>Spots: {lot._count.spots} | Chargers: {lot._count.chargingStations}</div>
+              </div>
+              <button className="button button-ghost" onClick={() => setSelectedLotId(lot.id)}>Manage</button>
+            </div>
+          ))}
+        </div>
+      </Card>
+
+      {selectedLotId && (
+        <Card>
+          <div className="button-row" style={{ justifyContent: "space-between", marginTop: 0 }}>
+            <h3>Spot Workspace</h3>
+            <button className="button button-ghost" onClick={() => setSelectedLotId("")}>Close</button>
+          </div>
+          <div className="stack" style={{ marginTop: "0.8rem" }}>
+            {spots.length === 0 && <p>No spots for this lot.</p>}
+            {spots.map((spot) => {
+              const draft = spotDrafts[spot.id];
+              const status = draft?.status ?? defaultStatus(spot);
+              const selected = statusOptions.find((option) => option.value === status) ?? statusOptions[0];
+
+              return (
+                <div key={spot.id} className="list-item" style={{ alignItems: "stretch" }}>
+                  <div className="stack compact" style={{ width: "100%" }}>
+                    <div className="button-row" style={{ marginTop: 0, justifyContent: "space-between" }}>
+                      <strong>{spot.label}</strong>
+                      <span className={`badge ${selected.badge}`}>{selected.label}</span>
+                    </div>
+
+                    <div className="grid two">
+                      <div className="form" style={{ marginTop: 0 }}>
+                        <label>Spot Label</label>
+                        <input
+                          value={draft?.label ?? spot.label}
+                          onChange={(e) => updateDraft(spot.id, { label: e.target.value })}
+                          placeholder="Spot label"
+                        />
+                      </div>
+
+                      <div className="form" style={{ marginTop: 0 }}>
+                        <label>Status</label>
+                        <select
+                          value={status}
+                          onChange={(e) => updateDraft(spot.id, { status: e.target.value as SpotAdminStatus })}
+                        >
+                          {statusOptions.map((option) => (
+                            <option key={option.value} value={option.value}>{option.label}</option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+
+                    <div className="button-row" style={{ marginTop: 0 }}>
+                      <button onClick={() => void handleSaveSpot(spot)} disabled={savingSpotId === spot.id}>
+                        {savingSpotId === spot.id ? "Saving..." : "Save Changes"}
+                      </button>
+                      <button
+                        className="button button-ghost"
+                        onClick={() => {
+                          updateDraft(spot.id, {
+                            label: spot.label,
+                            status: defaultStatus(spot)
+                          });
+                        }}
+                        disabled={savingSpotId === spot.id}
+                      >
+                        Reset
+                      </button>
+                    </div>
                   </div>
                 </div>
-              </Card>
-
-              <Card>
-                <h3>Spots</h3>
-                <div className="stack compact">
-                  {spots.length === 0 && <p>No spots for this lot.</p>}
-                  {spots.map((spot) => (
-                    <div key={spot.id} className="list-item">
-                      <div>
-                        <strong>{spot.label}</strong>
-                        <div>{spot.supportsEv ? "EV Spot" : "Parking Spot"}</div>
-                        <div>{spot.isAvailable ? "Available" : "Occupied"}</div>
-                      </div>
-                      <button className="button button-danger" onClick={() => void handleDeleteSpot(spot.id)}>Delete</button>
-                    </div>
-                  ))}
-                </div>
-              </Card>
-            </div>
-
-            <div className="stack">
-              <Card>
-                <h3>Add Charger</h3>
-                <div className="form">
-                  <input
-                    value={stationForm.name}
-                    onChange={(e) => setStationForm((prev) => ({ ...prev, name: e.target.value }))}
-                    placeholder="Charger name"
-                  />
-                  <input
-                    value={stationForm.connectorType}
-                    onChange={(e) => setStationForm((prev) => ({ ...prev, connectorType: e.target.value }))}
-                    placeholder="Connector type"
-                  />
-                  <input
-                    type="number"
-                    value={stationForm.maxKw}
-                    onChange={(e) => setStationForm((prev) => ({ ...prev, maxKw: Number(e.target.value) }))}
-                    placeholder="Max kW"
-                  />
-                  <button onClick={() => void handleCreateStation()} disabled={!stationForm.name}>Add Charger</button>
-                </div>
-              </Card>
-
-              <Card>
-                <h3>Chargers</h3>
-                <div className="stack compact">
-                  {stations.length === 0 && <p>No chargers for this lot.</p>}
-                  {stations.map((station) => (
-                    <div key={station.id} className="list-item">
-                      <div>
-                        <strong>{station.name}</strong>
-                        <div>{station.connectorType} | {station.maxKw} kW</div>
-                      </div>
-                      <button className="button button-danger" onClick={() => void handleDeleteStation(station.id)}>Delete</button>
-                    </div>
-                  ))}
-                </div>
-              </Card>
-            </div>
+              );
+            })}
           </div>
-        )}
-      </Card>
+        </Card>
+      )}
 
       {error && <div className="alert error">{error}</div>}
       {success && <div className="alert success">{success}</div>}
