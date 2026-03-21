@@ -75,6 +75,19 @@ export function deleteSpot(spotId: string) {
   return sendJson<void>(`/api/admin/spots/${spotId}`, "DELETE");
 }
 
+export function updateSpot(
+  spotId: string,
+  payload: {
+    label?: string;
+    isAvailable?: boolean;
+    supportsEv?: boolean;
+    adminStatus?: "available" | "reserved" | "occupied" | "under_repair" | "vip";
+    adminNote?: string | null;
+  }
+) {
+  return sendJson<ParkingSpot>(`/api/admin/spots/${spotId}`, "PATCH", payload);
+}
+
 export function createChargingStation(payload: {
   lotId: string;
   name: string;
