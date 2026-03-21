@@ -4,6 +4,54 @@ import express, { type NextFunction, type Request, type Response } from "express
 import type { Prisma, PrismaClient } from "@prisma/client";
 import prisma from "./prisma";
 
+type SpotAdminStatus = "available" | "reserved" | "occupied" | "under_repair" | "vip";
+const spotAdminStatuses = new Set<SpotAdminStatus>(["available", "reserved", "occupied", "under_repair", "vip"]);
+
+function deriveAvailabilityFromStatus(status: SpotAdminStatus) {
+  return status === "available";
+}
+
+function parseAdminStatus(metadata: string | null): SpotAdminStatus | undefined {
+  if (!metadata) {
+    return undefined;
+  }
+
+  try {
+    const parsed = JSON.parse(metadata) as { status?: unknown };
+    const normalized = String(parsed.status ?? "").toLowerCase() as SpotAdminStatus;
+    return spotAdminStatuses.has(normalized) ? normalized : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function fallbackSpotStatus(isAvailable: boolean): SpotAdminStatus {
+  return isAvailable ? "available" : "occupied";
+}
+
+function toLotSpotPrefix(lotName: string): string {
+  const words = lotName
+    .split(/[^A-Za-z0-9]+/)
+    .map((word) => word.trim())
+    .filter(Boolean);
+
+  if (words.length >= 2) {
+    return `${words[0][0]}${words[1][0]}`.toUpperCase();
+  }
+
+  const base = (words[0] ?? "SP").toUpperCase();
+  return base.length >= 2 ? base.slice(0, 2) : `${base}X`;
+}
+
+function normalizeSpotLabelByLot(lotName: string, label: string): string {
+  const legacyMatch = label.trim().match(/^S(\d+)$/i);
+  if (!legacyMatch) {
+    return label;
+  }
+
+  return `${toLotSpotPrefix(lotName)}-${legacyMatch[1]}`;
+}
+
 function startOfDayUtc(date = new Date()) {
   return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
 }
@@ -141,8 +189,43 @@ app.get("/api/lots", async (_req, res, next) => {
 
 app.get("/api/lots/:id/spots", async (req, res, next) => {
   try {
+    const lot = await prisma.parkingLot.findUnique({ where: { id: req.params.id }, select: { name: true } });
+    if (!lot) {
+      return res.status(404).json({ message: "Lot not found" });
+    }
+
     const list = await prisma.parkingSpot.findMany({ where: { lotId: req.params.id } });
-    res.json(list);
+    const events = await prisma.usageEvent.findMany({
+      where: {
+        lotId: req.params.id,
+        eventType: "admin_spot_status",
+        spotId: { in: list.map((spot) => spot.id) }
+      },
+      orderBy: { recordedAt: "desc" }
+    });
+
+    const latestBySpotId = new Map<string, { status?: SpotAdminStatus; note?: string | null }>();
+    for (const event of events) {
+      if (!event.spotId || latestBySpotId.has(event.spotId)) {
+        continue;
+      }
+      latestBySpotId.set(event.spotId, {
+        status: parseAdminStatus(event.metadata),
+        note: event.note
+      });
+    }
+
+    const payload = list.map((spot) => {
+      const latest = latestBySpotId.get(spot.id);
+      return {
+        ...spot,
+        label: normalizeSpotLabelByLot(lot.name, spot.label),
+        adminStatus: latest?.status ?? fallbackSpotStatus(spot.isAvailable),
+        adminNote: latest?.note ?? null
+      };
+    });
+
+    res.json(payload);
   } catch (err) {
     next(err);
   }
@@ -394,26 +477,7 @@ app.delete("/api/admin/lots/:id", async (req, res, next) => {
 
 app.post("/api/admin/spots", async (req, res, next) => {
   try {
-    const { lotId, label, isAvailable = true, supportsEv = false } = req.body;
-    if (!lotId || !label) {
-      return res.status(400).json({ message: "lotId and label are required" });
-    }
-
-    const spot = await prisma.parkingSpot.create({
-      data: {
-        lotId: String(lotId),
-        label: String(label),
-        isAvailable: Boolean(isAvailable),
-        supportsEv: Boolean(supportsEv)
-      }
-    });
-
-    await prisma.parkingLot.update({
-      where: { id: String(lotId) },
-      data: { totalSpots: { increment: 1 } }
-    });
-
-    res.status(201).json(spot);
+    res.status(403).json({ message: "Spot creation is disabled. Admin can only update existing spots." });
   } catch (err) {
     next(err);
   }
@@ -421,17 +485,56 @@ app.post("/api/admin/spots", async (req, res, next) => {
 
 app.patch("/api/admin/spots/:id", async (req, res, next) => {
   try {
-    const { label, isAvailable, supportsEv } = req.body;
+    const { label, isAvailable, supportsEv, adminStatus, adminNote } = req.body;
+    const hasAdminStatus = adminStatus !== undefined;
 
-    const spot = await prisma.parkingSpot.update({
+    let normalizedStatus: SpotAdminStatus | undefined;
+    if (hasAdminStatus) {
+      const candidate = String(adminStatus).toLowerCase() as SpotAdminStatus;
+      if (!spotAdminStatuses.has(candidate)) {
+        return res.status(400).json({ message: "Invalid adminStatus" });
+      }
+      normalizedStatus = candidate;
+    }
+
+    const spot = await prisma.parkingSpot.findUnique({ where: { id: req.params.id } });
+    if (!spot) {
+      return res.status(404).json({ message: "Spot not found" });
+    }
+
+    const nextAvailability =
+      isAvailable === undefined
+        ? normalizedStatus === undefined
+          ? undefined
+          : deriveAvailabilityFromStatus(normalizedStatus)
+        : Boolean(isAvailable);
+
+    const updatedSpot = await prisma.parkingSpot.update({
       where: { id: req.params.id },
       data: {
         ...(label === undefined ? {} : { label: String(label) }),
-        ...(isAvailable === undefined ? {} : { isAvailable: Boolean(isAvailable) }),
+        ...(nextAvailability === undefined ? {} : { isAvailable: nextAvailability }),
         ...(supportsEv === undefined ? {} : { supportsEv: Boolean(supportsEv) })
       }
     });
-    res.json(spot);
+
+    if (hasAdminStatus || adminNote !== undefined) {
+      await prisma.usageEvent.create({
+        data: {
+          lotId: spot.lotId,
+          spotId: spot.id,
+          eventType: "admin_spot_status",
+          note: adminNote === undefined ? null : String(adminNote),
+          metadata: JSON.stringify({ status: normalizedStatus ?? fallbackSpotStatus(updatedSpot.isAvailable) })
+        }
+      });
+    }
+
+    res.json({
+      ...updatedSpot,
+      adminStatus: normalizedStatus ?? fallbackSpotStatus(updatedSpot.isAvailable),
+      adminNote: adminNote === undefined ? null : String(adminNote)
+    });
   } catch (err) {
     next(err);
   }
@@ -439,18 +542,7 @@ app.patch("/api/admin/spots/:id", async (req, res, next) => {
 
 app.delete("/api/admin/spots/:id", async (req, res, next) => {
   try {
-    const spot = await prisma.parkingSpot.findUnique({ where: { id: req.params.id } });
-    if (!spot) {
-      return res.status(404).json({ message: "Spot not found" });
-    }
-
-    await deleteSpotCascade(req.params.id);
-    await prisma.parkingLot.update({
-      where: { id: spot.lotId },
-      data: { totalSpots: { decrement: 1 } }
-    });
-
-    res.status(204).send();
+    res.status(403).json({ message: "Spot deletion is disabled. Admin can only update existing spots." });
   } catch (err) {
     next(err);
   }

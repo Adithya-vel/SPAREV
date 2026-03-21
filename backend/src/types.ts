@@ -1,5 +1,6 @@
 export type ReservationStatus = "reserved" | "active" | "completed" | "cancelled";
 export type ChargingStatus = "idle" | "active" | "completed" | "failed";
+export type SpotAdminStatus = "available" | "reserved" | "occupied" | "under_repair" | "vip";
 
 export interface ParkingLot {
   id: string;
@@ -18,6 +19,8 @@ export interface ParkingSpot {
   label: string;
   isAvailable: boolean;
   supportsEv: boolean;
+  adminStatus?: SpotAdminStatus;
+  adminNote?: string | null;
 }
 
 export interface Reservation {

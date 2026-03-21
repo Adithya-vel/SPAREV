@@ -1,9 +1,10 @@
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
+import { fetchLots, fetchSpots } from "../api/client";
 
 type SlotType = "Parking" | "EV";
 type SlotStatus = "Available" | "Reserved" | "Occupied";
+type SpotAdminStatus = "available" | "reserved" | "occupied" | "under_repair" | "vip";
 
-const RESERVATION_DURATION_MINUTES = 60;
 const LS_SLOTS_KEY = "sparev_slots_v2";
 const LS_RES_KEY = "sparev_reservations_v2";
 const LS_SESSIONS_KEY = "sparev_charging_sessions_v2";
@@ -19,6 +20,7 @@ export type Slot = {
   lotId: string;
   label: string;
   type: SlotType;
+  adminStatus?: SpotAdminStatus;
 };
 
 export type Reservation = {
@@ -26,7 +28,8 @@ export type Reservation = {
   lotId: string;
   slotId: string;
   date: string; // YYYY-MM-DD
-  time: string; // HH:MM
+  fromTime: string; // HH:MM
+  toTime: string; // HH:MM
   startAt: number;
   endAt: number;
   source: "reservation" | "charging";
@@ -55,7 +58,7 @@ type SlotContextType = {
   chargingSessions: ChargingSession[];
   getSlotStatus: (slotId: string) => SlotStatus;
   getSlotsByLot: (lotId: string) => Slot[];
-  reserveSlot: (slotId: string, date: string, time: string) => { ok: true } | { ok: false; message: string };
+  reserveSlot: (slotId: string, date: string, fromTime: string, toTime: string) => { ok: true } | { ok: false; message: string };
   cancelReservation: (reservationId: string) => void;
   startCharging: (slotId: string, options: { targetKwh: number; ratePerKwh: number; powerKw: number }) =>
     { ok: true; sessionId: string } | { ok: false; message: string };
@@ -72,14 +75,29 @@ const defaultLots: ParkingLot[] = [
   { id: "LOT-4", name: "Innovation Yard", address: "Tech Park" }
 ];
 
+function toLotSpotPrefix(lotName: string): string {
+  const words = lotName
+    .split(/[^A-Za-z0-9]+/)
+    .map((word) => word.trim())
+    .filter(Boolean);
+
+  if (words.length >= 2) {
+    return `${words[0][0]}${words[1][0]}`.toUpperCase();
+  }
+
+  const base = (words[0] ?? "SP").toUpperCase();
+  return base.length >= 2 ? base.slice(0, 2) : `${base}X`;
+}
+
 const defaultSlots: Slot[] = defaultLots.flatMap((lot) =>
   Array.from({ length: 7 }, (_, index) => {
     const number = index + 1;
     const type: SlotType = number <= 2 ? "EV" : "Parking";
+    const prefix = toLotSpotPrefix(lot.name);
     return {
       id: `${lot.id}-S${number}`,
       lotId: lot.id,
-      label: `${lot.id.replace("LOT-", "L")}-${number}`,
+      label: `${prefix}-${number}`,
       type
     };
   })
@@ -111,10 +129,92 @@ function hasOverlap(startA: number, endA: number, startB: number, endB: number) 
   return startA < endB && startB < endA;
 }
 
+function toLocalTimeHHMM(timestamp: number) {
+  return new Date(timestamp).toTimeString().slice(0, 5);
+}
+
+function normalizeSavedSlotLabels(storedSlots: Slot[]): Slot[] {
+  const lotNameById = new Map(defaultLots.map((lot) => [lot.id, lot.name]));
+
+  return storedSlots.map((slot) => {
+    if (/^[A-Z]{2}-\d+$/i.test(slot.label)) {
+      return slot;
+    }
+
+    const lotName = lotNameById.get(slot.lotId);
+    if (!lotName) {
+      return slot;
+    }
+
+    const spotNumberMatch = slot.label.match(/(\d+)$/) ?? slot.id.match(/S(\d+)$/i);
+    if (!spotNumberMatch) {
+      return slot;
+    }
+
+    return {
+      ...slot,
+      label: `${toLotSpotPrefix(lotName)}-${spotNumberMatch[1]}`
+    };
+  });
+}
+
+type LegacyReservation = Reservation & { time?: string };
+
+function normalizeReservations(storedReservations: LegacyReservation[]): Reservation[] {
+  return storedReservations
+    .filter((reservation) => Number.isFinite(reservation.startAt) && Number.isFinite(reservation.endAt))
+    .map((reservation) => ({
+      ...reservation,
+      fromTime: reservation.fromTime ?? reservation.time ?? toLocalTimeHHMM(reservation.startAt),
+      toTime: reservation.toTime ?? toLocalTimeHHMM(reservation.endAt)
+    }));
+}
+
 export const SlotProvider = ({ children }: { children: React.ReactNode }) => {
-  const [slots, setSlots] = useState<Slot[]>(() => loadJSON(LS_SLOTS_KEY, defaultSlots));
-  const [reservations, setReservations] = useState<Reservation[]>(() => loadJSON(LS_RES_KEY, []));
+  const [lots, setLots] = useState<ParkingLot[]>(defaultLots);
+  const [slots, setSlots] = useState<Slot[]>(() => normalizeSavedSlotLabels(loadJSON(LS_SLOTS_KEY, defaultSlots)));
+  const [reservations, setReservations] = useState<Reservation[]>(() => normalizeReservations(loadJSON(LS_RES_KEY, [])));
   const [chargingSessions, setChargingSessions] = useState<ChargingSession[]>(() => loadJSON(LS_SESSIONS_KEY, []));
+
+  const syncSlotsFromBackend = async () => {
+    try {
+      const apiLots = await fetchLots();
+      const mappedLots: ParkingLot[] = apiLots.map((lot) => ({
+        id: lot.id,
+        name: lot.name,
+        address: lot.address
+      }));
+
+      const perLotSpots = await Promise.all(
+        mappedLots.map(async (lot) => {
+          const spotList = await fetchSpots(lot.id);
+          return spotList.map((spot) => ({
+            id: spot.id,
+            lotId: spot.lotId,
+            label: spot.label,
+            type: spot.supportsEv ? "EV" : "Parking",
+            adminStatus: spot.adminStatus
+          } as Slot));
+        })
+      );
+
+      setLots(mappedLots);
+      setSlots(normalizeSavedSlotLabels(perLotSpots.flat()));
+    } catch {
+      // Keep local data if API is unavailable.
+    }
+  };
+
+  useEffect(() => {
+    void syncSlotsFromBackend();
+
+    const handleExternalRefresh = () => {
+      void syncSlotsFromBackend();
+    };
+
+    window.addEventListener("sparev:spot-updated", handleExternalRefresh);
+    return () => window.removeEventListener("sparev:spot-updated", handleExternalRefresh);
+  }, []);
 
   // persist
   useEffect(() => {
@@ -130,6 +230,11 @@ export const SlotProvider = ({ children }: { children: React.ReactNode }) => {
   }, [chargingSessions]);
 
   const getSlotStatus = (slotId: string): SlotStatus => {
+    const slot = slots.find((s) => s.id === slotId);
+    if (slot?.adminStatus && slot.adminStatus !== "available") {
+      return slot.adminStatus === "reserved" ? "Reserved" : "Occupied";
+    }
+
     const now = Date.now();
     const slotReservations = reservations.filter((r) => r.slotId === slotId);
 
@@ -146,18 +251,26 @@ export const SlotProvider = ({ children }: { children: React.ReactNode }) => {
 
   const getSlotsByLot = (lotId: string) => slots.filter((s) => s.lotId === lotId);
 
-  const reserveSlot = (slotId: string, date: string, time: string) => {
+  const reserveSlot = (slotId: string, date: string, fromTime: string, toTime: string) => {
     const target = slots.find((s) => s.id === slotId);
     if (!target) return { ok: false as const, message: "Slot not found" };
-    if (!date || !time) return { ok: false as const, message: "Please fill date & time" };
+    if (target.adminStatus && target.adminStatus !== "available") {
+      return { ok: false as const, message: "Slot is blocked by admin status" };
+    }
+    if (!date || !fromTime || !toTime) return { ok: false as const, message: "Please fill date, from time and to time" };
 
-    const startDate = parseStart(date, time);
-    if (!startDate) {
-      return { ok: false as const, message: "Invalid date/time" };
+    const startDate = parseStart(date, fromTime);
+    const endDate = parseStart(date, toTime);
+    if (!startDate || !endDate) {
+      return { ok: false as const, message: "Invalid date or time" };
     }
 
     const startAt = startDate.getTime();
-    const endAt = startAt + RESERVATION_DURATION_MINUTES * 60 * 1000;
+    const endAt = endDate.getTime();
+
+    if (endAt <= startAt) {
+      return { ok: false as const, message: "To time must be after from time" };
+    }
 
     if (endAt <= Date.now()) {
       return { ok: false as const, message: "Choose a future time slot" };
@@ -176,7 +289,8 @@ export const SlotProvider = ({ children }: { children: React.ReactNode }) => {
       lotId: target.lotId,
       slotId,
       date,
-      time,
+      fromTime,
+      toTime,
       startAt,
       endAt,
       source: "reservation",
@@ -228,7 +342,8 @@ const startCharging = (
     lotId: target.lotId,
     slotId,
     date: new Date(now).toISOString().slice(0, 10),
-    time: new Date(now).toTimeString().slice(0, 5),
+    fromTime: new Date(now).toTimeString().slice(0, 5),
+    toTime: toLocalTimeHHMM(endAt),
     startAt: now,
     endAt,
     source: "charging",
@@ -300,11 +415,12 @@ const resetSystem = () => {
   setSlots(defaultSlots);
   setReservations([]);
   setChargingSessions([]);
+  void syncSlotsFromBackend();
 };
 
   const value = useMemo(
   () => ({
-    lots: defaultLots,
+    lots,
     slots,
     reservations,
     chargingSessions,
@@ -316,7 +432,7 @@ const resetSystem = () => {
     stopCharging,
     resetSystem,
   }),
-  [slots, reservations, chargingSessions]
+  [lots, slots, reservations, chargingSessions]
 );
 
 

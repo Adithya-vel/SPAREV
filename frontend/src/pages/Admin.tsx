@@ -132,6 +132,7 @@ const Admin = () => {
       });
 
       await loadLotDetails(selectedLotId);
+      window.dispatchEvent(new Event("sparev:spot-updated"));
       showSuccess(`Updated ${draft.label || spot.label}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to update spot");
@@ -199,7 +200,10 @@ const Admin = () => {
                 <div key={spot.id} className="list-item" style={{ alignItems: "stretch" }}>
                   <div className="stack compact" style={{ width: "100%" }}>
                     <div className="button-row" style={{ marginTop: 0, justifyContent: "space-between" }}>
-                      <strong>{spot.label}</strong>
+                      <div>
+                        <p className="eyebrow">{spot.supportsEv ? "EV" : "Parking"}</p>
+                        <strong>{spot.label}</strong>
+                      </div>
                       <span className={`badge ${selected.badge}`}>{selected.label}</span>
                     </div>
 

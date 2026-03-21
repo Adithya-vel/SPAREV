@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import PageContainer from "../components/pagecontainer";
 import Card from "../components/card";
 import { useSlots } from "../context/SlotContext";
@@ -9,30 +9,45 @@ const Reservation = () => {
     reservations,
     reserveSlot,
     cancelReservation,
-    getSlotsByLot,
-    getSlotStatus
+    getSlotsByLot
   } = useSlots();
 
   const [lotId, setLotId] = useState(lots[0]?.id ?? "");
   const [slotId, setSlotId] = useState("");
   const [date, setDate] = useState("");
-  const [time, setTime] = useState("");
+  const [fromTime, setFromTime] = useState("");
+  const [toTime, setToTime] = useState("");
   const [message, setMessage] = useState("");
 
   const lotSlots = lotId ? getSlotsByLot(lotId) : [];
 
   const selectedLot = lots.find((lot) => lot.id === lotId);
 
+  useEffect(() => {
+    if (lots.length === 0) {
+      setLotId("");
+      setSlotId("");
+      return;
+    }
+
+    const currentLotExists = lots.some((lot) => lot.id === lotId);
+    if (!currentLotExists) {
+      setLotId(lots[0].id);
+      setSlotId("");
+    }
+  }, [lots, lotId]);
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
 
-    const result = reserveSlot(slotId, date, time);
+    const result = reserveSlot(slotId, date, fromTime, toTime);
     if (!result.ok) {
+      window.alert(result.message);
       setMessage(`❌ ${result.message}`);
       return;
     }
 
-    setMessage(`✅ Reserved ${slotId} on ${date} at ${time}`);
+    setMessage(`✅ Reserved ${slotId} on ${date} from ${fromTime} to ${toTime}`);
     setSlotId("");
   };
 
@@ -56,25 +71,23 @@ const Reservation = () => {
 
             <select value={slotId} onChange={(e) => setSlotId(e.target.value)}>
               <option value="">Select Slot</option>
-              {lotSlots.map((s) => {
-                const status = getSlotStatus(s.id);
-                return (
-                  <option key={s.id} value={s.id}>
-                    {s.type} {s.label} - {status}
-                  </option>
-                );
-              })}
+              {lotSlots.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.label}
+                </option>
+              ))}
             </select>
 
             <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
-            <input type="time" value={time} onChange={(e) => setTime(e.target.value)} />
+            <input type="time" value={fromTime} onChange={(e) => setFromTime(e.target.value)} />
+            <input type="time" value={toTime} onChange={(e) => setToTime(e.target.value)} />
 
             <button type="submit">Reserve</button>
           </form>
 
           {selectedLot && (
             <p className="muted-note" style={{ marginTop: "0.6rem" }}>
-              Booking in {selectedLot.name}. One reservation blocks a slot for 60 minutes.
+              Booking in {selectedLot.name}. One spot can have only one reservation in the chosen time window.
             </p>
           )}
 
@@ -98,7 +111,7 @@ const Reservation = () => {
                         <strong>Lot:</strong> {lot?.name ?? r.lotId} <br />
                         <strong>Slot:</strong> {r.slotId} <br />
                         <strong>Date:</strong> {r.date} <br />
-                        <strong>Time:</strong> {r.time}
+                        <strong>Time:</strong> {r.fromTime} to {r.toTime}
                       </div>
 
                       <button

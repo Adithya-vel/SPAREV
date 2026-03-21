@@ -13,6 +13,20 @@ const lotTemplates = [
   { name: "Innovation Yard", address: "Tech Park", distanceMeters: 170 }
 ];
 
+function toLotSpotPrefix(lotName: string): string {
+  const words = lotName
+    .split(/[^A-Za-z0-9]+/)
+    .map((word) => word.trim())
+    .filter(Boolean);
+
+  if (words.length >= 2) {
+    return `${words[0][0]}${words[1][0]}`.toUpperCase();
+  }
+
+  const base = (words[0] ?? "SP").toUpperCase();
+  return base.length >= 2 ? base.slice(0, 2) : `${base}X`;
+}
+
 async function main() {
   await prisma.reservationEvent.deleteMany();
   await prisma.usageEvent.deleteMany();
@@ -33,6 +47,7 @@ async function main() {
 
   for (let i = 0; i < lotTemplates.length; i += 1) {
     const template = lotTemplates[i];
+    const lotPrefix = toLotSpotPrefix(template.name);
     const lot = await prisma.parkingLot.create({
       data: {
         name: template.name,
@@ -43,7 +58,7 @@ async function main() {
         distanceMeters: template.distanceMeters,
         spots: {
           create: Array.from({ length: 7 }, (_, index) => ({
-            label: `S${index + 1}`,
+            label: `${lotPrefix}-${index + 1}`,
             isAvailable: true,
             supportsEv: index < 2
           }))
@@ -65,32 +80,11 @@ async function main() {
     });
   }
 
-  const now = new Date();
-  const activeReservation = await prisma.reservation.create({
-    data: {
-      lotId: lots[0].id,
-      spotId: lots[0].spots[0].id,
-      userId: "demo-user",
-      vehiclePlate: "TN-00-XX-0000",
-      status: "reserved",
-      startTime: new Date(now.getTime() - 20 * 60 * 1000),
-      endTime: new Date(now.getTime() + 40 * 60 * 1000)
-    }
-  });
-
-  await prisma.reservationEvent.create({
-    data: {
-      reservationId: activeReservation.id,
-      status: "reserved",
-      note: "seed created"
-    }
-  });
-
   await prisma.chargingSession.create({
     data: {
       stationId: lots[0].chargers[0].id,
-      reservationId: activeReservation.id,
-      userId: activeReservation.userId,
+      reservationId: null,
+      userId: "demo-user",
       startedAt: new Date(Date.now() - 1000 * 60 * 30),
       endedAt: new Date(),
       energyKwh: 18.4,
@@ -105,7 +99,7 @@ async function main() {
       data: {
         lotId: lot.id,
         date: today,
-        reservationsCount: 3,
+        reservationsCount: 0,
         chargingSessionsCount: 2,
         energyKwh: 25.5,
         revenueCents: 4200,
@@ -120,15 +114,6 @@ async function main() {
       pricePerHour: 35,
       pricePerKwh: 12.5,
       peakMultiplier: 1.2
-    }
-  });
-
-  await prisma.transaction.create({
-    data: {
-      reservationId: activeReservation.id,
-      amountCents: 2000,
-      currency: "INR",
-      status: "paid"
     }
   });
 }
