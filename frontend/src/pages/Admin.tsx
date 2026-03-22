@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import PageContainer from "../components/pagecontainer";
 import Card from "../components/card";
 import type { ParkingLot, ParkingSpot, SpotAdminStatus } from "@shared/types";
-import { fetchAdminLots, fetchSpots, updateSpot } from "../api/client";
+import { fetchAdminLots, fetchReservations, fetchSpots, updateSpot } from "../api/client";
 
 type AdminLot = ParkingLot & {
   _count: { spots: number; chargingStations: number; reservations: number };
@@ -11,6 +11,15 @@ type AdminLot = ParkingLot & {
 type SpotDraft = {
   label: string;
   status: SpotAdminStatus;
+};
+
+type LiveReservation = {
+  id: string;
+  lotId: string;
+  spotId: string;
+  startTime: string;
+  endTime: string | null;
+  status: string;
 };
 
 const statusOptions: Array<{ value: SpotAdminStatus; label: string; badge: string }> = [
@@ -28,15 +37,35 @@ const defaultStatus = (spot: ParkingSpot): SpotAdminStatus => {
   return spot.isAvailable ? "available" : "occupied";
 };
 
+function statusFromReservations(spotId: string, reservationsBySpot: Map<string, LiveReservation[]>): SpotAdminStatus {
+  const now = Date.now();
+  const reservations = reservationsBySpot.get(spotId) ?? [];
+
+  const hasActive = reservations.some((reservation) => {
+    const start = new Date(reservation.startTime).getTime();
+    const end = reservation.endTime ? new Date(reservation.endTime).getTime() : Number.POSITIVE_INFINITY;
+    return start <= now && now < end;
+  });
+
+  if (hasActive) {
+    return "occupied";
+  }
+
+  const hasUpcoming = reservations.some((reservation) => new Date(reservation.startTime).getTime() > now);
+  return hasUpcoming ? "reserved" : "available";
+}
+
 const Admin = () => {
   const [lots, setLots] = useState<AdminLot[]>([]);
   const [spots, setSpots] = useState<ParkingSpot[]>([]);
+  const [totalLiveReservations, setTotalLiveReservations] = useState(0);
   const [selectedLotId, setSelectedLotId] = useState("");
   const [loading, setLoading] = useState(false);
   const [savingSpotId, setSavingSpotId] = useState("");
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [spotDrafts, setSpotDrafts] = useState<Record<string, SpotDraft>>({});
+  const [lotReservations, setLotReservations] = useState<LiveReservation[]>([]);
 
   const showSuccess = (message: string) => {
     setSuccess(message);
@@ -47,8 +76,14 @@ const Admin = () => {
     setLoading(true);
     setError("");
     try {
-      const data = await fetchAdminLots();
+      const [data, liveReservations] = await Promise.all([
+        fetchAdminLots(),
+        fetchReservations()
+      ]);
       setLots(data);
+      setTotalLiveReservations(
+        liveReservations.filter((reservation) => reservation.status !== "cancelled" && reservation.status !== "completed").length
+      );
 
       const nextSelected =
         preferredLotId && data.some((lot) => lot.id === preferredLotId)
@@ -65,14 +100,22 @@ const Admin = () => {
   const loadLotDetails = async (lotId: string) => {
     if (!lotId) {
       setSpots([]);
+      setLotReservations([]);
       setSpotDrafts({});
       return;
     }
 
     setError("");
     try {
-      const spotList = await fetchSpots(lotId);
+      const [spotList, reservationList] = await Promise.all([
+        fetchSpots(lotId),
+        fetchReservations({ lotId })
+      ]);
+
       setSpots(spotList);
+      setLotReservations(
+        reservationList.filter((reservation) => reservation.status !== "cancelled" && reservation.status !== "completed")
+      );
       setSpotDrafts(
         Object.fromEntries(
           spotList.map((spot) => [
@@ -97,13 +140,24 @@ const Admin = () => {
     void loadLotDetails(selectedLotId);
   }, [selectedLotId]);
 
+  useEffect(() => {
+    const pollId = window.setInterval(() => {
+      void loadLots(selectedLotId);
+      if (selectedLotId) {
+        void loadLotDetails(selectedLotId);
+      }
+    }, 15000);
+
+    return () => window.clearInterval(pollId);
+  }, [selectedLotId]);
+
   const stats = useMemo(() => {
     const totalLots = lots.length;
     const totalSpots = lots.reduce((sum, lot) => sum + lot._count.spots, 0);
     const totalChargers = lots.reduce((sum, lot) => sum + lot._count.chargingStations, 0);
-    const totalReservations = lots.reduce((sum, lot) => sum + lot._count.reservations, 0);
+    const totalReservations = totalLiveReservations;
     return { totalLots, totalSpots, totalChargers, totalReservations };
-  }, [lots]);
+  }, [lots, totalLiveReservations]);
 
   const updateDraft = (spotId: string, patch: Partial<SpotDraft>) => {
     setSpotDrafts((prev) => {
@@ -142,9 +196,36 @@ const Admin = () => {
   };
 
   const managedSpots = useMemo(
-    () => spots.filter((spot) => spot.adminStatus && spot.adminStatus !== "available"),
-    [spots]
+    () => {
+      const map = new Map<string, LiveReservation[]>();
+      for (const reservation of lotReservations) {
+        const list = map.get(reservation.spotId) ?? [];
+        list.push(reservation);
+        map.set(reservation.spotId, list);
+      }
+
+      return spots.filter((spot) => {
+        const draft = spotDrafts[spot.id];
+        const adminStatus = draft?.status ?? defaultStatus(spot);
+        const effective =
+          adminStatus === "available"
+            ? statusFromReservations(spot.id, map)
+            : adminStatus;
+        return effective !== "available";
+      });
+    },
+    [spots, spotDrafts, lotReservations]
   );
+
+  const reservationMapBySpot = useMemo(() => {
+    const map = new Map<string, LiveReservation[]>();
+    for (const reservation of lotReservations) {
+      const list = map.get(reservation.spotId) ?? [];
+      list.push(reservation);
+      map.set(reservation.spotId, list);
+    }
+    return map;
+  }, [lotReservations]);
 
   return (
     <PageContainer title="Admin Control Room" subtitle="Update-only operations: reserve, mark occupied, set under-repair, and assign VIP spots.">
@@ -198,8 +279,12 @@ const Admin = () => {
             {spots.length === 0 && <p>No spots for this lot.</p>}
             {spots.map((spot) => {
               const draft = spotDrafts[spot.id];
-              const status = draft?.status ?? defaultStatus(spot);
-              const selected = statusOptions.find((option) => option.value === status) ?? statusOptions[0];
+              const adminStatus = draft?.status ?? defaultStatus(spot);
+              const effectiveStatus =
+                adminStatus === "available"
+                  ? statusFromReservations(spot.id, reservationMapBySpot)
+                  : adminStatus;
+              const selected = statusOptions.find((option) => option.value === effectiveStatus) ?? statusOptions[0];
 
               return (
                 <div key={spot.id} className="list-item" style={{ alignItems: "stretch" }}>
@@ -225,7 +310,7 @@ const Admin = () => {
                       <div className="form" style={{ marginTop: 0 }}>
                         <label>Status</label>
                         <select
-                          value={status}
+                          value={adminStatus}
                           onChange={(e) => updateDraft(spot.id, { status: e.target.value as SpotAdminStatus })}
                         >
                           {statusOptions.map((option) => (
@@ -269,7 +354,12 @@ const Admin = () => {
               >
                 <h4>Managed Spots (shown until set to Available)</h4>
                 {managedSpots.map((spot) => {
-                  const currentStatus = defaultStatus(spot);
+                  const draft = spotDrafts[spot.id];
+                  const adminStatus = draft?.status ?? defaultStatus(spot);
+                  const currentStatus =
+                    adminStatus === "available"
+                      ? statusFromReservations(spot.id, reservationMapBySpot)
+                      : adminStatus;
                   const option = statusOptions.find((item) => item.value === currentStatus) ?? statusOptions[0];
 
                   return (

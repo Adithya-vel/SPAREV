@@ -40,6 +40,81 @@ export function fetchChargingStations() {
   return getJson<ChargingStation[]>("/api/charging-stations");
 }
 
+export function fetchChargingSessions(params?: { status?: "active" | "completed" }) {
+  const search = new URLSearchParams();
+  if (params?.status) {
+    search.set("status", params.status);
+  }
+
+  const suffix = search.toString();
+  return getJson<Array<{
+    id: string;
+    stationId: string;
+    reservationId: string | null;
+    userId: string;
+    startedAt: string;
+    endedAt: string | null;
+    status: string;
+    energyKwh: number | null;
+    cost: number | null;
+  }>>(`/api/charging-sessions${suffix ? `?${suffix}` : ""}`);
+}
+
+export function fetchReservations(params?: { lotId?: string; includePast?: boolean }) {
+  const search = new URLSearchParams();
+  if (params?.lotId) {
+    search.set("lotId", params.lotId);
+  }
+  if (params?.includePast) {
+    search.set("includePast", "true");
+  }
+
+  const suffix = search.toString();
+  return getJson<Array<{
+    id: string;
+    lotId: string;
+    spotId: string;
+    userId: string;
+    vehiclePlate: string;
+    startTime: string;
+    endTime: string | null;
+    status: string;
+  }>>(`/api/reservations${suffix ? `?${suffix}` : ""}`);
+}
+
+export function createReservation(payload: {
+  lotId: string;
+  spotId: string;
+  vehiclePlate: string;
+  userId?: string;
+  startTime?: string;
+  durationMinutes?: number;
+}) {
+  return sendJson<{
+    id: string;
+    lotId: string;
+    spotId: string;
+    userId: string;
+    vehiclePlate: string;
+    startTime: string;
+    endTime: string | null;
+    status: string;
+  }>("/api/reservations", "POST", payload);
+}
+
+export function cancelReservation(reservationId: string, payload?: { reason?: string }) {
+  return sendJson<{
+    id: string;
+    lotId: string;
+    spotId: string;
+    userId: string;
+    vehiclePlate: string;
+    startTime: string;
+    endTime: string | null;
+    status: string;
+  }>(`/api/reservations/${reservationId}/cancel`, "POST", payload);
+}
+
 export function fetchAdminLots() {
   return getJson<Array<ParkingLot & {
     _count: { spots: number; chargingStations: number; reservations: number };
@@ -100,4 +175,41 @@ export function createChargingStation(payload: {
 
 export function deleteChargingStation(stationId: string) {
   return sendJson<void>(`/api/admin/charging-stations/${stationId}`, "DELETE");
+}
+
+export function createChargingSession(payload: {
+  stationId: string;
+  reservationId?: string;
+  userId?: string;
+  energyKwh?: number;
+  cost?: number;
+}) {
+  return sendJson<{
+    id: string;
+    stationId: string;
+    reservationId: string | null;
+    userId: string;
+    startedAt: string;
+    endedAt: string | null;
+    status: string;
+    energyKwh: number | null;
+    cost: number | null;
+  }>("/api/charging-sessions", "POST", payload);
+}
+
+export function stopChargingSession(
+  sessionId: string,
+  payload?: { energyKwh?: number; cost?: number }
+) {
+  return sendJson<{
+    id: string;
+    stationId: string;
+    reservationId: string | null;
+    userId: string;
+    startedAt: string;
+    endedAt: string | null;
+    status: string;
+    energyKwh: number | null;
+    cost: number | null;
+  }>(`/api/charging-sessions/${sessionId}/stop`, "POST", payload);
 }

@@ -1,8 +1,18 @@
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
-import { fetchLots, fetchSpots } from "../api/client";
+import {
+  createChargingSession as apiCreateChargingSession,
+  cancelReservation as apiCancelReservation,
+  createReservation as apiCreateReservation,
+  fetchChargingSessions,
+  fetchChargingStations,
+  fetchLots,
+  fetchReservations,
+  fetchSpots,
+  stopChargingSession as apiStopChargingSession
+} from "../api/client";
 
 type SlotType = "Parking" | "EV";
-type SlotStatus = "Available" | "Reserved" | "Occupied";
+type SlotStatus = "Available" | "Reserved" | "Occupied" | "Under Repair" | "VIP Only";
 type SpotAdminStatus = "available" | "reserved" | "occupied" | "under_repair" | "vip";
 
 const LS_SLOTS_KEY = "sparev_slots_v2";
@@ -57,12 +67,16 @@ type SlotContextType = {
   reservations: Reservation[];
   chargingSessions: ChargingSession[];
   getSlotStatus: (slotId: string) => SlotStatus;
+  getSlotTypeLabel: (slotId: string) => SlotType | "Unknown";
+  getSlotDisplayLabel: (slotId: string) => string;
   getSlotsByLot: (lotId: string) => Slot[];
-  reserveSlot: (slotId: string, date: string, fromTime: string, toTime: string) => { ok: true } | { ok: false; message: string };
-  cancelReservation: (reservationId: string) => void;
-  startCharging: (slotId: string, options: { targetKwh: number; ratePerKwh: number; powerKw: number }) =>
-    { ok: true; sessionId: string } | { ok: false; message: string };
-  stopCharging: (sessionId: string) => { ok: true } | { ok: false; message: string };
+  reserveSlot: (slotId: string, date: string, fromTime: string, toTime: string) => Promise<{ ok: true } | { ok: false; message: string }>;
+  cancelReservation: (reservationId: string) => Promise<{ ok: true } | { ok: false; message: string }>;
+  startCharging: (
+    slotId: string,
+    options: { targetKwh: number; ratePerKwh: number; powerKw: number }
+  ) => Promise<{ ok: true; sessionId: string } | { ok: false; message: string }>;
+  stopCharging: (sessionId: string) => Promise<{ ok: true } | { ok: false; message: string }>;
   resetSystem: () => void;
 };
 
@@ -111,10 +125,6 @@ function loadJSON<T>(key: string, fallback: T): T {
   } catch {
     return fallback;
   }
-}
-
-function makeId() {
-  return Math.random().toString(16).slice(2) + "-" + Date.now().toString(16);
 }
 
 function parseStart(date: string, time: string) {
@@ -170,6 +180,113 @@ function normalizeReservations(storedReservations: LegacyReservation[]): Reserva
     }));
 }
 
+type ApiReservation = {
+  id: string;
+  lotId: string;
+  spotId: string;
+  userId: string;
+  vehiclePlate: string;
+  startTime: string;
+  endTime: string | null;
+  status: string;
+};
+
+type ApiChargingSession = {
+  id: string;
+  stationId: string;
+  reservationId: string | null;
+  userId: string;
+  startedAt: string;
+  endedAt: string | null;
+  status: string;
+  energyKwh: number | null;
+  cost: number | null;
+};
+
+function toContextReservation(apiReservation: ApiReservation): Reservation | null {
+  const startAt = new Date(apiReservation.startTime).getTime();
+  if (!Number.isFinite(startAt)) {
+    return null;
+  }
+
+  const endAt = apiReservation.endTime
+    ? new Date(apiReservation.endTime).getTime()
+    : Number.POSITIVE_INFINITY;
+
+  if (!Number.isFinite(endAt) && endAt !== Number.POSITIVE_INFINITY) {
+    return null;
+  }
+
+  return {
+    id: apiReservation.id,
+    lotId: apiReservation.lotId,
+    slotId: apiReservation.spotId,
+    date: apiReservation.startTime.slice(0, 10),
+    fromTime: toLocalTimeHHMM(startAt),
+    toTime: Number.isFinite(endAt) ? toLocalTimeHHMM(endAt) : "--:--",
+    startAt,
+    endAt,
+    source: "reservation",
+    createdAt: startAt
+  };
+}
+
+function toContextChargingSession(
+  apiSession: ApiChargingSession,
+  reservationById: Map<string, Reservation>,
+  slotByReservationId: Map<string, string>
+): ChargingSession | null {
+  const reservationId = apiSession.reservationId;
+  if (!reservationId) {
+    return null;
+  }
+
+  const reservation = reservationById.get(reservationId);
+  const slotId = slotByReservationId.get(reservationId) ?? reservation?.slotId;
+  const lotId = reservation?.lotId;
+  const pluggedInAt = new Date(apiSession.startedAt).getTime();
+  const unpluggedAt = apiSession.endedAt ? new Date(apiSession.endedAt).getTime() : undefined;
+
+  if (!slotId || !lotId || !Number.isFinite(pluggedInAt)) {
+    return null;
+  }
+
+  const deliveredKwh = apiSession.energyKwh ?? undefined;
+  const amount = apiSession.cost ?? undefined;
+  const elapsedHours =
+    unpluggedAt && unpluggedAt > pluggedInAt
+      ? (unpluggedAt - pluggedInAt) / (1000 * 60 * 60)
+      : undefined;
+  const inferredPower =
+    elapsedHours && deliveredKwh !== undefined && elapsedHours > 0
+      ? Number((deliveredKwh / elapsedHours).toFixed(2))
+      : 7.2;
+  const inferredRate =
+    deliveredKwh && amount !== undefined && deliveredKwh > 0
+      ? Number((amount / deliveredKwh).toFixed(2))
+      : 18;
+  const inferredTargetKwh =
+    deliveredKwh ??
+    (reservation && Number.isFinite(reservation.endAt)
+      ? Math.max(1, Math.ceil(((reservation.endAt - reservation.startAt) / (1000 * 60 * 60)) * inferredPower))
+      : 1);
+
+  return {
+    id: apiSession.id,
+    reservationId,
+    lotId,
+    slotId,
+    targetKwh: inferredTargetKwh,
+    ratePerKwh: inferredRate,
+    powerKw: inferredPower,
+    pluggedInAt,
+    ...(unpluggedAt ? { unpluggedAt } : {}),
+    ...(deliveredKwh === undefined ? {} : { deliveredKwh }),
+    ...(amount === undefined ? {} : { amount }),
+    status: apiSession.status === "completed" ? "completed" : "active"
+  };
+}
+
 export const SlotProvider = ({ children }: { children: React.ReactNode }) => {
   const [lots, setLots] = useState<ParkingLot[]>(defaultLots);
   const [slots, setSlots] = useState<Slot[]>(() => normalizeSavedSlotLabels(loadJSON(LS_SLOTS_KEY, defaultSlots)));
@@ -205,15 +322,71 @@ export const SlotProvider = ({ children }: { children: React.ReactNode }) => {
     }
   };
 
+  const syncReservationsFromBackend = async () => {
+    try {
+      const apiReservations = await fetchReservations();
+      const mappedReservations = apiReservations
+        .filter((reservation) => reservation.status !== "cancelled" && reservation.status !== "completed")
+        .map((reservation) => toContextReservation(reservation))
+        .filter((reservation): reservation is Reservation => reservation !== null);
+
+      setReservations(mappedReservations);
+    } catch {
+      // Keep local data if API is unavailable.
+    }
+  };
+
+  const syncChargingSessionsFromBackend = async () => {
+    try {
+      const [apiReservations, apiSessions] = await Promise.all([
+        fetchReservations({ includePast: true }),
+        fetchChargingSessions()
+      ]);
+
+      const reservationMap = new Map<string, Reservation>();
+      const slotByReservationId = new Map<string, string>();
+
+      for (const reservation of apiReservations) {
+        const mappedReservation = toContextReservation(reservation);
+        if (!mappedReservation) {
+          continue;
+        }
+        reservationMap.set(reservation.id, mappedReservation);
+        slotByReservationId.set(reservation.id, reservation.spotId);
+      }
+
+      const mappedSessions = apiSessions
+        .map((session) => toContextChargingSession(session, reservationMap, slotByReservationId))
+        .filter((session): session is ChargingSession => session !== null);
+
+      setChargingSessions(mappedSessions);
+    } catch {
+      // Keep local data if API is unavailable.
+    }
+  };
+
   useEffect(() => {
     void syncSlotsFromBackend();
+    void syncReservationsFromBackend();
+    void syncChargingSessionsFromBackend();
 
     const handleExternalRefresh = () => {
       void syncSlotsFromBackend();
+      void syncReservationsFromBackend();
+      void syncChargingSessionsFromBackend();
     };
 
+    const pollId = window.setInterval(() => {
+      void syncSlotsFromBackend();
+      void syncReservationsFromBackend();
+      void syncChargingSessionsFromBackend();
+    }, 15000);
+
     window.addEventListener("sparev:spot-updated", handleExternalRefresh);
-    return () => window.removeEventListener("sparev:spot-updated", handleExternalRefresh);
+    return () => {
+      window.removeEventListener("sparev:spot-updated", handleExternalRefresh);
+      window.clearInterval(pollId);
+    };
   }, []);
 
   // persist
@@ -232,7 +405,10 @@ export const SlotProvider = ({ children }: { children: React.ReactNode }) => {
   const getSlotStatus = (slotId: string): SlotStatus => {
     const slot = slots.find((s) => s.id === slotId);
     if (slot?.adminStatus && slot.adminStatus !== "available") {
-      return slot.adminStatus === "reserved" ? "Reserved" : "Occupied";
+      if (slot.adminStatus === "reserved") return "Reserved";
+      if (slot.adminStatus === "under_repair") return "Under Repair";
+      if (slot.adminStatus === "vip") return "VIP Only";
+      return "Occupied";
     }
 
     const now = Date.now();
@@ -249,9 +425,22 @@ export const SlotProvider = ({ children }: { children: React.ReactNode }) => {
     return "Available";
   };
 
+  const getSlotTypeLabel = (slotId: string): SlotType | "Unknown" => {
+    const slot = slots.find((s) => s.id === slotId);
+    return slot?.type ?? "Unknown";
+  };
+
+  const getSlotDisplayLabel = (slotId: string) => {
+    const slot = slots.find((s) => s.id === slotId);
+    if (!slot) {
+      return slotId;
+    }
+    return `${slot.label} (${slot.type})`;
+  };
+
   const getSlotsByLot = (lotId: string) => slots.filter((s) => s.lotId === lotId);
 
-  const reserveSlot = (slotId: string, date: string, fromTime: string, toTime: string) => {
+  const reserveSlot = async (slotId: string, date: string, fromTime: string, toTime: string) => {
     const target = slots.find((s) => s.id === slotId);
     if (!target) return { ok: false as const, message: "Slot not found" };
     if (target.adminStatus && target.adminStatus !== "available") {
@@ -284,28 +473,52 @@ export const SlotProvider = ({ children }: { children: React.ReactNode }) => {
       return { ok: false as const, message: "Slot already reserved for that time" };
     }
 
-    const newRes: Reservation = {
-      id: makeId(),
-      lotId: target.lotId,
-      slotId,
-      date,
-      fromTime,
-      toTime,
-      startAt,
-      endAt,
-      source: "reservation",
-      createdAt: Date.now(),
-    };
-    setReservations((prev) => [newRes, ...prev]);
+    try {
+      const durationMinutes = Math.max(1, Math.ceil((endAt - startAt) / (60 * 1000)));
+      const created = await apiCreateReservation({
+        lotId: target.lotId,
+        spotId: slotId,
+        vehiclePlate: "DEMO-USER",
+        startTime: new Date(startAt).toISOString(),
+        durationMinutes
+      });
 
-    return { ok: true as const };
+      const mappedReservation = toContextReservation(created);
+      if (mappedReservation) {
+        setReservations((prev) => [mappedReservation, ...prev.filter((reservation) => reservation.id !== mappedReservation.id)]);
+      } else {
+        await syncReservationsFromBackend();
+      }
+
+      window.dispatchEvent(new Event("sparev:spot-updated"));
+      return { ok: true as const };
+    } catch {
+      return { ok: false as const, message: "Failed to create reservation" };
+    }
   };
 
-const cancelReservation = (reservationId: string) => {
-  setReservations((prev) => prev.filter((r) => r.id !== reservationId));
+const cancelReservation = async (reservationId: string) => {
+  const targetReservation = reservations.find((reservation) => reservation.id === reservationId);
+  if (!targetReservation) {
+    return { ok: false as const, message: "Reservation not found" };
+  }
+
+  if (targetReservation.source === "charging") {
+    setReservations((prev) => prev.filter((reservation) => reservation.id !== reservationId));
+    return { ok: true as const };
+  }
+
+  try {
+    await apiCancelReservation(reservationId, { reason: "Cancelled from reservation page" });
+    setReservations((prev) => prev.filter((reservation) => reservation.id !== reservationId));
+    window.dispatchEvent(new Event("sparev:spot-updated"));
+    return { ok: true as const };
+  } catch {
+    return { ok: false as const, message: "Failed to cancel reservation" };
+  }
 };
 
-const startCharging = (
+const startCharging = async (
   slotId: string,
   options: { targetKwh: number; ratePerKwh: number; powerKw: number }
 ) => {
@@ -334,77 +547,82 @@ const startCharging = (
     return { ok: false as const, message: "Slot has a conflicting reservation" };
   }
 
-  const reservationId = makeId();
-  const sessionId = makeId();
+  try {
+    const stations = await fetchChargingStations();
+    const station = stations.find((item) => item.lotId === target.lotId);
+    if (!station) {
+      return { ok: false as const, message: "No charging station configured for this lot" };
+    }
 
-  const chargingReservation: Reservation = {
-    id: reservationId,
-    lotId: target.lotId,
-    slotId,
-    date: new Date(now).toISOString().slice(0, 10),
-    fromTime: new Date(now).toTimeString().slice(0, 5),
-    toTime: toLocalTimeHHMM(endAt),
-    startAt: now,
-    endAt,
-    source: "charging",
-    createdAt: now
-  };
+    const durationMinutes = Math.max(1, Math.ceil((options.targetKwh / options.powerKw) * 60));
+    const createdReservation = await apiCreateReservation({
+      lotId: target.lotId,
+      spotId: slotId,
+      vehiclePlate: "EV-CHARGE",
+      startTime: new Date(now).toISOString(),
+      durationMinutes
+    });
 
-  const session: ChargingSession = {
-    id: sessionId,
-    reservationId,
-    lotId: target.lotId,
-    slotId,
-    targetKwh: options.targetKwh,
-    ratePerKwh: options.ratePerKwh,
-    powerKw: options.powerKw,
-    pluggedInAt: now,
-    status: "active"
-  };
+    const estimatedAmount = Math.round(options.targetKwh * options.ratePerKwh);
+    const createdSession = await apiCreateChargingSession({
+      stationId: station.id,
+      reservationId: createdReservation.id,
+      userId: "demo-user",
+      energyKwh: options.targetKwh,
+      cost: estimatedAmount
+    });
 
-  setReservations((prev) => [chargingReservation, ...prev]);
-  setChargingSessions((prev) => [session, ...prev]);
+    const mappedReservation = toContextReservation(createdReservation);
+    if (mappedReservation) {
+      setReservations((prev) => [mappedReservation, ...prev.filter((reservation) => reservation.id !== mappedReservation.id)]);
+    } else {
+      await syncReservationsFromBackend();
+    }
 
-  return { ok: true as const, sessionId };
+    const session: ChargingSession = {
+      id: createdSession.id,
+      reservationId: createdReservation.id,
+      lotId: target.lotId,
+      slotId,
+      targetKwh: options.targetKwh,
+      ratePerKwh: options.ratePerKwh,
+      powerKw: options.powerKw,
+      pluggedInAt: now,
+      status: "active"
+    };
+
+    setChargingSessions((prev) => [session, ...prev.filter((item) => item.id !== session.id)]);
+    window.dispatchEvent(new Event("sparev:spot-updated"));
+    return { ok: true as const, sessionId: createdSession.id };
+  } catch {
+    return { ok: false as const, message: "Failed to start charging session" };
+  }
 };
 
 const stopCharging = (sessionId: string) => {
   const session = chargingSessions.find((s) => s.id === sessionId && s.status === "active");
   if (!session) {
-    return { ok: false as const, message: "Active session not found" };
+    return Promise.resolve({ ok: false as const, message: "Active session not found" });
   }
 
-  const now = Date.now();
-  const elapsedHours = Math.max(0, (now - session.pluggedInAt) / (1000 * 60 * 60));
-  const deliveredKwh = Math.min(session.targetKwh, elapsedHours * session.powerKw);
-  const amount = deliveredKwh * session.ratePerKwh;
+  return (async () => {
+    try {
+      const now = Date.now();
+      const elapsedHours = Math.max(0, (now - session.pluggedInAt) / (1000 * 60 * 60));
+      const deliveredKwh = Number(Math.min(session.targetKwh, elapsedHours * session.powerKw).toFixed(3));
+      const amount = Math.round(deliveredKwh * session.ratePerKwh);
 
-  setChargingSessions((prev) =>
-    prev.map((s) =>
-      s.id === sessionId
-        ? {
-            ...s,
-            status: "completed",
-            unpluggedAt: now,
-            deliveredKwh,
-            amount
-          }
-        : s
-    )
-  );
+      await apiStopChargingSession(sessionId, { energyKwh: deliveredKwh, cost: amount });
+      await apiCancelReservation(session.reservationId, { reason: "Charging completed" });
 
-  setReservations((prev) =>
-    prev.map((r) =>
-      r.id === session.reservationId
-        ? {
-            ...r,
-            endAt: now
-          }
-        : r
-    )
-  );
-
-  return { ok: true as const };
+      await syncReservationsFromBackend();
+      await syncChargingSessionsFromBackend();
+      window.dispatchEvent(new Event("sparev:spot-updated"));
+      return { ok: true as const };
+    } catch {
+      return { ok: false as const, message: "Failed to stop charging session" };
+    }
+  })();
 };
 
 const resetSystem = () => {
@@ -416,6 +634,8 @@ const resetSystem = () => {
   setReservations([]);
   setChargingSessions([]);
   void syncSlotsFromBackend();
+  void syncReservationsFromBackend();
+  void syncChargingSessionsFromBackend();
 };
 
   const value = useMemo(
@@ -425,6 +645,8 @@ const resetSystem = () => {
     reservations,
     chargingSessions,
     getSlotStatus,
+    getSlotTypeLabel,
+    getSlotDisplayLabel,
     getSlotsByLot,
     reserveSlot,
     cancelReservation,

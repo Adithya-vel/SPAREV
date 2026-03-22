@@ -9,7 +9,9 @@ const Reservation = () => {
     reservations,
     reserveSlot,
     cancelReservation,
-    getSlotsByLot
+    getSlotsByLot,
+    getSlotStatus,
+    getSlotDisplayLabel
   } = useSlots();
 
   const [lotId, setLotId] = useState(lots[0]?.id ?? "");
@@ -20,6 +22,7 @@ const Reservation = () => {
   const [message, setMessage] = useState("");
 
   const lotSlots = lotId ? getSlotsByLot(lotId) : [];
+  const selectableSlots = lotSlots.filter((slot) => getSlotStatus(slot.id) === "Available");
 
   const selectedLot = lots.find((lot) => lot.id === lotId);
 
@@ -37,10 +40,10 @@ const Reservation = () => {
     }
   }, [lots, lotId]);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    const result = reserveSlot(slotId, date, fromTime, toTime);
+    const result = await reserveSlot(slotId, date, fromTime, toTime);
     if (!result.ok) {
       window.alert(result.message);
       setMessage(`❌ ${result.message}`);
@@ -71,9 +74,9 @@ const Reservation = () => {
 
             <select value={slotId} onChange={(e) => setSlotId(e.target.value)}>
               <option value="">Select Slot</option>
-              {lotSlots.map((s) => (
+              {selectableSlots.map((s) => (
                 <option key={s.id} value={s.id}>
-                  {s.label}
+                  {s.label} ({s.type.toLowerCase()})
                 </option>
               ))}
             </select>
@@ -87,7 +90,8 @@ const Reservation = () => {
 
           {selectedLot && (
             <p className="muted-note" style={{ marginTop: "0.6rem" }}>
-              Booking in {selectedLot.name}. One spot can have only one reservation in the chosen time window.
+              Booking in {selectedLot.name}. Only currently available spots are selectable.
+              EV/Parking type is shown beside each spot.
             </p>
           )}
 
@@ -109,15 +113,19 @@ const Reservation = () => {
                     <div key={r.id} className="list-item">
                       <div>
                         <strong>Lot:</strong> {lot?.name ?? r.lotId} <br />
-                        <strong>Slot:</strong> {r.slotId} <br />
+                        <strong>Slot:</strong> {getSlotDisplayLabel(r.slotId)} <br />
                         <strong>Date:</strong> {r.date} <br />
                         <strong>Time:</strong> {r.fromTime} to {r.toTime}
                       </div>
 
                       <button
                         type="button"
-                        onClick={() => {
-                          cancelReservation(r.id);
+                        onClick={async () => {
+                          const result = await cancelReservation(r.id);
+                          if (!result.ok) {
+                            setMessage(`❌ ${result.message}`);
+                            return;
+                          }
                           setMessage(`✅ Cancelled reservation for ${r.slotId}`);
                         }}
                       >

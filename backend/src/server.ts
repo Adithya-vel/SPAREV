@@ -293,6 +293,85 @@ app.post("/api/reservations", async (req, res, next) => {
   }
 });
 
+app.get("/api/reservations", async (req, res, next) => {
+  try {
+    const lotId = typeof req.query.lotId === "string" ? req.query.lotId : undefined;
+    const includePast = String(req.query.includePast ?? "false").toLowerCase() === "true";
+    const now = new Date();
+
+    const reservations = await prisma.reservation.findMany({
+      where: {
+        ...(lotId ? { lotId } : {}),
+        ...(includePast
+          ? {}
+          : {
+              OR: [{ endTime: null }, { endTime: { gt: now } }]
+            })
+      },
+      orderBy: [{ startTime: "asc" }]
+    });
+
+    res.json(reservations);
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.post("/api/reservations/:id/cancel", async (req, res, next) => {
+  try {
+    const reservation = await prisma.reservation.findUnique({ where: { id: req.params.id } });
+    if (!reservation) {
+      return res.status(404).json({ message: "Reservation not found" });
+    }
+
+    if (reservation.status === "cancelled") {
+      return res.json(reservation);
+    }
+
+    if (reservation.status === "completed") {
+      return res.status(409).json({ message: "Completed reservation cannot be cancelled" });
+    }
+
+    const reason = req.body?.reason ? String(req.body.reason) : "Cancelled via API";
+    const now = new Date();
+
+    const updated = await prisma.$transaction(async (tx) => {
+      const nextReservation = await tx.reservation.update({
+        where: { id: reservation.id },
+        data: {
+          status: "cancelled",
+          endTime: reservation.endTime && reservation.endTime < now ? reservation.endTime : now
+        }
+      });
+
+      await tx.reservationEvent.create({
+        data: {
+          reservationId: reservation.id,
+          status: "cancelled",
+          note: reason
+        }
+      });
+
+      await tx.usageEvent.create({
+        data: {
+          lotId: reservation.lotId,
+          spotId: reservation.spotId,
+          eventType: "reservation_cancel",
+          recordedAt: now,
+          deltaAvailable: 1,
+          note: reason
+        }
+      });
+
+      return nextReservation;
+    });
+
+    res.json(updated);
+  } catch (err) {
+    next(err);
+  }
+});
+
 app.get("/api/reservations/:id", async (req, res, next) => {
   try {
     const reservation = await prisma.reservation.findUnique({
@@ -312,6 +391,19 @@ app.get("/api/charging-stations", async (_req, res, next) => {
   try {
     const data = await prisma.chargingStation.findMany();
     res.json(data);
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.get("/api/charging-sessions", async (req, res, next) => {
+  try {
+    const status = typeof req.query.status === "string" ? req.query.status : undefined;
+    const sessions = await prisma.chargingSession.findMany({
+      where: status ? { status } : undefined,
+      orderBy: { startedAt: "desc" }
+    });
+    res.json(sessions);
   } catch (err) {
     next(err);
   }
@@ -349,6 +441,54 @@ app.post("/api/charging-sessions", async (req, res, next) => {
     });
 
     res.status(201).json(session);
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.post("/api/charging-sessions/:id/stop", async (req, res, next) => {
+  try {
+    const session = await prisma.chargingSession.findUnique({
+      where: { id: req.params.id },
+      include: { station: { select: { lotId: true } } }
+    });
+
+    if (!session) {
+      return res.status(404).json({ message: "Charging session not found" });
+    }
+
+    if (session.status === "completed") {
+      return res.json(session);
+    }
+
+    const now = new Date();
+    const energyKwh = req.body?.energyKwh === undefined ? session.energyKwh : Number(req.body.energyKwh);
+    const cost = req.body?.cost === undefined ? session.cost : Number(req.body.cost);
+
+    const updated = await prisma.$transaction(async (tx) => {
+      const completed = await tx.chargingSession.update({
+        where: { id: session.id },
+        data: {
+          status: "completed",
+          endedAt: now,
+          ...(energyKwh === undefined || Number.isNaN(energyKwh) ? {} : { energyKwh }),
+          ...(cost === undefined || Number.isNaN(cost) ? {} : { cost })
+        }
+      });
+
+      await tx.usageEvent.create({
+        data: {
+          lotId: session.station.lotId,
+          eventType: "charging_stop",
+          recordedAt: now,
+          metadata: JSON.stringify({ stationId: session.stationId, sessionId: session.id })
+        }
+      });
+
+      return completed;
+    });
+
+    res.json(updated);
   } catch (err) {
     next(err);
   }
@@ -508,6 +648,24 @@ app.patch("/api/admin/spots/:id", async (req, res, next) => {
           ? undefined
           : deriveAvailabilityFromStatus(normalizedStatus)
         : Boolean(isAvailable);
+
+    if (nextAvailability === true || normalizedStatus === "available") {
+      const now = new Date();
+      const activeOrUpcomingReservation = await prisma.reservation.findFirst({
+        where: {
+          spotId: spot.id,
+          status: { notIn: ["cancelled", "completed"] },
+          OR: [{ endTime: null }, { endTime: { gt: now } }]
+        },
+        select: { id: true }
+      });
+
+      if (activeOrUpcomingReservation) {
+        return res.status(409).json({
+          message: "Spot has an active or upcoming reservation and cannot be marked available"
+        });
+      }
+    }
 
     const updatedSpot = await prisma.parkingSpot.update({
       where: { id: req.params.id },

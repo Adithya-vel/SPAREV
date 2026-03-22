@@ -50,7 +50,7 @@ const Charging = () => {
     ? liveKwh * activeSession.ratePerKwh
     : 0;
 
-  const plugIn = () => {
+  const plugIn = async () => {
     if (!selectedSlotId) {
       setMsg("❌ Select an EV slot first");
       return;
@@ -66,7 +66,7 @@ const Charging = () => {
       return;
     }
 
-    const result = startCharging(selectedSlotId, {
+    const result = await startCharging(selectedSlotId, {
       targetKwh,
       ratePerKwh: RATE_PER_KWH,
       powerKw: POWER_KW
@@ -80,13 +80,13 @@ const Charging = () => {
     setMsg(`✅ Plug-in successful on ${selectedSlotId}`);
   };
 
-  const plugOut = () => {
+  const plugOut = async () => {
     if (!activeSession) {
       setMsg("❌ No active session to stop");
       return;
     }
 
-    const result = stopCharging(activeSession.id);
+    const result = await stopCharging(activeSession.id);
     if (!result.ok) {
       setMsg(`❌ ${result.message}`);
       return;
@@ -116,7 +116,7 @@ const Charging = () => {
             <option value="">Select EV Slot</option>
             {evSlots.map((s) => (
               <option key={s.id} value={s.id}>
-                {s.label} - {getSlotStatus(s.id)}
+                {s.label} ({s.type.toLowerCase()}) - {getSlotStatus(s.id)}
               </option>
             ))}
           </select>
@@ -131,11 +131,11 @@ const Charging = () => {
           />
 
           <div className="button-row">
-            <button type="button" onClick={plugIn} disabled={Boolean(activeSession)}>
+            <button type="button" onClick={() => void plugIn()} disabled={Boolean(activeSession)}>
               Plug In
             </button>
 
-            <button type="button" onClick={plugOut} disabled={!activeSession}>
+            <button type="button" onClick={() => void plugOut()} disabled={!activeSession}>
               Plug Out
             </button>
           </div>
