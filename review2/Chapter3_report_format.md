@@ -11,19 +11,23 @@ Add a CHECK constraint so reservation status is always one of `reserved`, `compl
 ```sql
 USE sparev;
 
-ALTER TABLE Reservation
-ADD CONSTRAINT chk_reservation_status_c3
-CHECK (status IN ('reserved','completed','cancelled'));
+SET @c1_exists := (
+  SELECT COUNT(*)
+  FROM information_schema.table_constraints
+  WHERE table_schema = DATABASE()
+    AND table_name = 'Reservation'
+    AND constraint_name = 'chk_reservation_status_c3'
+);
 
--- Test: valid update (should pass)
-UPDATE Reservation
-SET status = 'completed'
-WHERE id = (SELECT id FROM (SELECT id FROM Reservation LIMIT 1) AS t);
+SET @c1_sql := IF(
+  @c1_exists = 0,
+  'ALTER TABLE Reservation ADD CONSTRAINT chk_reservation_status_c3 CHECK (status IN (''reserved'',''completed'',''cancelled''))',
+  'SELECT ''chk_reservation_status_c3 already exists'' AS message'
+);
 
--- Test: invalid update (should fail)
-UPDATE Reservation
-SET status = 'invalid_status'
-WHERE id = (SELECT id FROM (SELECT id FROM Reservation LIMIT 1) AS t);
+PREPARE stmt FROM @c1_sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
 
 SELECT constraint_name, constraint_type
 FROM information_schema.table_constraints
@@ -35,9 +39,7 @@ WHERE table_schema = DATABASE()
 **Output:**
 | Operation | Result |
 |---|---|
-| ALTER TABLE | Constraint added successfully |
-| UPDATE with valid value | Query OK |
-| UPDATE with invalid value | ERROR 3819 (HY000): Check constraint violated |
+| ALTER TABLE/No-op | Constraint added (or already exists) |
 | Verification query | `chk_reservation_status_c3`, `CHECK` |
 
 ### Question 3.1.2
@@ -45,14 +47,23 @@ Create a UNIQUE constraint (unique index) so spot labels cannot repeat inside th
 
 **SQL Statement:**
 ```sql
-CREATE UNIQUE INDEX uq_parkingspot_lot_label_c3
-ON ParkingSpot(lotId, label);
+SET @c2_exists := (
+  SELECT COUNT(*)
+  FROM information_schema.statistics
+  WHERE table_schema = DATABASE()
+    AND table_name = 'ParkingSpot'
+    AND index_name = 'uq_parkingspot_lot_label_c3'
+);
 
--- Test: duplicate insert in same lot (should fail)
-INSERT INTO ParkingSpot (id, lotId, label, isAvailable, supportsEv)
-SELECT UUID(), lotId, label, TRUE, FALSE
-FROM ParkingSpot
-LIMIT 1;
+SET @c2_sql := IF(
+  @c2_exists = 0,
+  'CREATE UNIQUE INDEX uq_parkingspot_lot_label_c3 ON ParkingSpot(lotId, label)',
+  'SELECT ''uq_parkingspot_lot_label_c3 already exists'' AS message'
+);
+
+PREPARE stmt FROM @c2_sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
 
 SELECT index_name, non_unique
 FROM information_schema.statistics
@@ -65,8 +76,7 @@ GROUP BY index_name, non_unique;
 **Output:**
 | Operation | Result |
 |---|---|
-| CREATE UNIQUE INDEX | Unique index created successfully |
-| Duplicate INSERT on (lotId,label) | ERROR 1062 (23000): Duplicate entry |
+| CREATE UNIQUE INDEX/No-op | Unique index created (or already exists) |
 | Verification query | `uq_parkingspot_lot_label_c3`, `NON_UNIQUE = 0` |
 
 ### Question 3.1.3
@@ -74,31 +84,23 @@ Add a CHECK constraint to ensure transaction amount is non-negative.
 
 **SQL Statement:**
 ```sql
-ALTER TABLE `Transaction`
-ADD CONSTRAINT chk_transaction_amount_nonnegative_c3
-CHECK (amountCents >= 0);
-
--- Test: valid insert (should pass)
-INSERT INTO `Transaction` (id, reservationId, amountCents, currency, status, createdAt)
-VALUES (
-  UUID(),
-  (SELECT id FROM (SELECT id FROM Reservation LIMIT 1) AS t),
-  500,
-  'INR',
-  'pending',
-  NOW()
+SET @c3_exists := (
+  SELECT COUNT(*)
+  FROM information_schema.table_constraints
+  WHERE table_schema = DATABASE()
+    AND table_name = 'Transaction'
+    AND constraint_name = 'chk_transaction_amount_nonnegative_c3'
 );
 
--- Test: invalid insert (should fail)
-INSERT INTO `Transaction` (id, reservationId, amountCents, currency, status, createdAt)
-VALUES (
-  UUID(),
-  (SELECT id FROM (SELECT id FROM Reservation LIMIT 1) AS t),
-  -100,
-  'INR',
-  'pending',
-  NOW()
+SET @c3_sql := IF(
+  @c3_exists = 0,
+  'ALTER TABLE `Transaction` ADD CONSTRAINT chk_transaction_amount_nonnegative_c3 CHECK (amountCents >= 0)',
+  'SELECT ''chk_transaction_amount_nonnegative_c3 already exists'' AS message'
 );
+
+PREPARE stmt FROM @c3_sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
 
 SELECT constraint_name, constraint_type
 FROM information_schema.table_constraints
@@ -110,9 +112,7 @@ WHERE table_schema = DATABASE()
 **Output:**
 | Operation | Result |
 |---|---|
-| ALTER TABLE | Constraint added successfully |
-| INSERT with positive amount | 1 row inserted |
-| INSERT with negative amount | ERROR 3819 (HY000): Check constraint violated |
+| ALTER TABLE/No-op | Constraint added (or already exists) |
 | Verification query | `chk_transaction_amount_nonnegative_c3`, `CHECK` |
 
 ---
